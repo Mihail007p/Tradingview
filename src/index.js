@@ -198,6 +198,10 @@ async function handleJournal(request, env) {
   return err("Метод не поддерживается.", 405);
 }
 
+const KEY_HINT =
+  "Нужен ключ доступа. Введи его в поле «Ключ доступа» вверху страницы " +
+  "(или открой сайт по ссылке с ?key=ТВОЙ_КЛЮЧ). Только тогда доступны анализ и журнал.";
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -206,28 +210,11 @@ export default {
       return new Response(null, { status: 204, headers: CORS });
     }
 
-    if (url.pathname === "/api/health") {
-      return json({
-        ok: true,
-        service: "chart-analyst-bot",
-        model: env.VISION_MODEL || DEFAULT_MODEL,
-        journal: createJournal(env).available,
-        time: new Date().toISOString(),
-      });
-    }
-
-    if (!authorized(request, env)) {
-      return err("Неверный ключ доступа.", 401);
-    }
-
-    if (url.pathname === "/api/analyze" && request.method === "POST") {
-      return handleAnalyze(request, env);
-    }
-
-    if (url.pathname === "/api/journal") {
-      return handleJournal(request, env);
-    }
-
+    // --- UI отдаём всегда -----------------------------------------------
+    // Раньше страница тоже была за ключом, и без ?key= пользователь видел
+    // только JSON {"error":"Неверный ключ доступа."} — даже поля для ввода
+    // ключа не было. Сама HTML-страница бесплатна (не тратит квоту Workers AI),
+    // поэтому её отдаём открыто, а ключ проверяем на /api/*.
     if (url.pathname === "/" || url.pathname === "/index.html") {
       return new Response(ui(), {
         headers: {
@@ -237,6 +224,33 @@ export default {
       });
     }
 
-    return json({ ok: false, error: "Not found" }, 404);
+    if (url.pathname === "/api/health") {
+      return json({
+        ok: true,
+        service: "chart-analyst-bot",
+        model: env.VISION_MODEL || DEFAULT_MODEL,
+        journal: createJournal(env).available,
+        auth: Boolean(env.ACCESS_KEY),
+        time: new Date().toISOString(),
+      });
+    }
+
+    if (url.pathname.startsWith("/api/")) {
+      if (!authorized(request, env)) {
+        return err(KEY_HINT, 401);
+      }
+
+      if (url.pathname === "/api/analyze" && request.method === "POST") {
+        return handleAnalyze(request, env);
+      }
+
+      if (url.pathname === "/api/journal") {
+        return handleJournal(request, env);
+      }
+
+      return err("Not found", 404);
+    }
+
+    return err("Not found", 404);
   },
 };
