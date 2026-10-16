@@ -18,7 +18,8 @@ binding = "AI"
 # Если задан — UI требует его в заголовке X-Api-Key / ?key=..., чтобы
 # никто другой не тратил твою квоту Workers AI.
 [vars]
-# VISION_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+# По умолчанию: Gemma 4 (vision + thinking), temperature = 0.
+# VISION_MODEL = "@cf/google/gemma-4-26b-a4b-it"
 
 # --- Журнал сделок на Cloudflare KV --------------------------
 # 1. Создай неймспейс:
