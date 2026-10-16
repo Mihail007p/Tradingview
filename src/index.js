@@ -33,10 +33,19 @@ const err = (msg, status = 400) => json({ ok: false, error: msg }, status);
 
 /** Optional shared secret so nobody else can burn your Workers AI quota. */
 function authorized(request, env) {
-  if (!env.ACCESS_KEY) return true;
-  const header = request.headers.get("X-Api-Key") || "";
-  const qs = new URL(request.url).searchParams.get("key") || "";
-  return header === env.ACCESS_KEY || qs === env.ACCESS_KEY;
+  // Секрет мог попасть в Cloudflare с переводом строки/пробелами по краям
+  // (например, `echo "$ACCESS_KEY" | wrangler secret put ...` добавляет \n),
+  // а пользователь вводит ключ без них — сравниваем обе стороны обрезанными,
+  // иначе «правильный» пароль никогда не совпадёт с секретом.
+  const expected = String((env && env.ACCESS_KEY) || "").trim();
+  if (!expected) return true;
+  const header = (request.headers.get("X-Api-Key") || "").trim();
+  const qs = (new URL(request.url).searchParams.get("key") || "").trim();
+  return header === expected || qs === expected;
+}
+
+function authRequired(env) {
+  return Boolean(String((env && env.ACCESS_KEY) || "").trim());
 }
 
 function dataUriToBytes(dataUri) {
@@ -230,7 +239,11 @@ export default {
         service: "chart-analyst-bot",
         model: env.VISION_MODEL || DEFAULT_MODEL,
         journal: createJournal(env).available,
-        auth: Boolean(env.ACCESS_KEY),
+        auth: authRequired(env),
+        // Принимается ли ключ, присланный с этим запросом. Раньше health
+        // ключ не проверял вовсе, и интерфейс при НЕВЕРНОМ пароле показывал
+        // «онлайн» — пользователь не мог понять, что пароль не подошёл.
+        keyValid: authorized(request, env),
         time: new Date().toISOString(),
       });
     }

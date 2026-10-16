@@ -72,6 +72,7 @@ export function ui() {
   .card h3{margin:0 0 12px;font-size:13px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);font-weight:600}
 
   .drop{
+    display:block;
     border:1.5px dashed var(--line);border-radius:12px;padding:26px 16px;text-align:center;
     cursor:pointer;transition:.15s;background:var(--panel2)
   }
@@ -80,7 +81,13 @@ export function ui() {
   .drop .ico{font-size:28px;margin-bottom:8px;opacity:.85}
   .drop b{display:block;font-size:14px}
   .drop span{color:var(--muted);font-size:12px}
-  #file{display:none}
+  /* НЕ display:none: ряд браузеров (Safari, встроенные браузеры) игнорируют
+     программный .click() по полю с display:none — диалог выбора не открывается
+     и «ничего не происходит». Поле остаётся в потоке, но невидимо. */
+  #file{
+    position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;
+    clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0;padding:0
+  }
   .preview{margin-top:12px;position:relative;display:none}
   .preview img{width:100%;border-radius:10px;border:1px solid var(--line);display:block;max-height:340px;object-fit:contain;background:#000}
   .preview button{
@@ -217,13 +224,13 @@ export function ui() {
       <div>
         <div class="card">
           <h3>Скриншот графика</h3>
-          <div class="drop" id="drop" role="button" tabindex="0" aria-label="Добавить скриншот графика">
+          <label class="drop" id="drop" for="file" role="button" tabindex="0" aria-label="Добавить скриншот графика">
             <div class="ico">🖼️</div>
             <b>Перетащи сюда скриншот</b>
             <span>или кликни · или вставь Ctrl+V</span>
             <span style="display:block;margin-top:4px">PNG, JPG или WebP</span>
-          </div>
-          <input type="file" id="file" accept="image/*">
+            <input type="file" id="file" accept="image/*">
+          </label>
           <div class="preview" id="preview">
             <img id="pimg" alt="предпросмотр">
             <button id="pclear" title="Убрать">✕</button>
@@ -322,8 +329,24 @@ export function ui() {
   function $(id){ return document.getElementById(id); }
 
   var API = location.origin;
-  var KEY = new URLSearchParams(location.search).get("key") || localStorage.getItem("ca_key") || "";
-  if (KEY) localStorage.setItem("ca_key", KEY);
+
+  // Доступ к localStorage обёрнут в try/catch: в приватном режиме, при
+  // заблокированных cookies и во встроенных браузерах он БРОСАЕТ исключение.
+  // Раньше голый localStorage.getItem стоял в самом начале скрипта — и при
+  // броске умирал ВЕСЬ интерфейс: клик по скриншоту «ничего не делал»,
+  // а введённый пароль никуда не применялся.
+  function storeGet(k){
+    try { return localStorage.getItem(k); } catch(_){ return null; }
+  }
+  function storeSet(k, v){
+    try { localStorage.setItem(k, v); } catch(_){}
+  }
+  function storeRemove(k){
+    try { localStorage.removeItem(k); } catch(_){}
+  }
+
+  var KEY = (new URLSearchParams(location.search).get("key") || storeGet("ca_key") || "").trim();
+  if (KEY) storeSet("ca_key", KEY);
   var state = { image:null, result:null };
 
   // ---------- access key field ----------
@@ -342,12 +365,28 @@ export function ui() {
 
   if ($key) {
     $key.value = KEY;
-    $key.addEventListener("input", function(){
+    var keyTimer = null;
+    var onKeyChanged = function(){
       KEY = $key.value.trim();
-      if (KEY) localStorage.setItem("ca_key", KEY);
-      else localStorage.removeItem("ca_key");
-      health();
-    });
+      if (KEY) storeSet("ca_key", KEY);
+      else storeRemove("ca_key");
+      // Раньше здесь вызывался только health(), который ключ не проверял:
+      // журнал при первой загрузке без ключа уже успевал навсегда уйти в
+      // локальный режим (401), и правильный пароль, введённый после этого,
+      // «не работал» до перезагрузки страницы. Теперь смена ключа сбрасывает
+      // локальный режим и заново проверяет сервер: ключ + журнал.
+      if (keyTimer) clearTimeout(keyTimer);
+      keyTimer = setTimeout(function(){
+        journalLocal = false;
+        journalReason = "";
+        health();
+        loadJournal();
+      }, 400);
+    };
+    // "change" — в дополнение к "input": автозаполнение и менеджеры паролей
+    // в части браузеров меняют значение без события input.
+    $key.addEventListener("input", onKeyChanged);
+    $key.addEventListener("change", onKeyChanged);
   }
 
   function hdr(extra){
@@ -382,16 +421,25 @@ export function ui() {
       .then(function(r){ return r.json(); })
       .then(function(d){
         var model = (d.model || "").replace("@cf/meta/","");
+        // Сервер теперь сообщает, принят ли присланный ключ (keyValid).
+        // Раньше статус при любом пароле показывал «онлайн», и понять,
+        // что пароль не подошёл, было невозможно.
+        if (d.auth && !d.keyValid){
+          $("dot").className = "dot bad";
+          $("status").textContent = KEY ? "неверный ключ доступа" : "нужен ключ доступа";
+          return;
+        }
+        var keyNote = d.auth ? " · ключ принят" : "";
         if (journalLocal){
           // статус уже показывает локальный журнал — не перетираем
           $("dot").className = "dot warn";
-          $("status").textContent = "онлайн · " + model + " · журнал локально";
+          $("status").textContent = "онлайн · " + model + keyNote + " · журнал локально";
           return;
         }
         $("dot").className = "dot ok";
         $("status").textContent = d.journal
-          ? "онлайн · " + model
-          : "онлайн · журнал локально (KV не подключён)";
+          ? "онлайн · " + model + keyNote
+          : "онлайн · журнал локально (KV не подключён)" + keyNote;
         if (!d.journal) $("dot").className = "dot warn";
       })
       .catch(function(){
@@ -506,9 +554,17 @@ export function ui() {
     fileInput.value = "";
     fileInput.click();
   }
-  drop.addEventListener("click", openPicker);
+  // Клик мышью открывает диалог БЕЗ JavaScript: зона загрузки — это
+  // <label for="file">, и браузер сам «нажимает» поле файла. Программный
+  // fileInput.click() по полю с display:none ряд браузеров игнорирует —
+  // клик по зоне выглядел как «ничего не происходит». JS-открытие осталось
+  // только для клавиатуры (Enter/Space) и клика по превью (заменить снимок).
   drop.addEventListener("keydown", function(e){
     if (e.key === "Enter" || e.key === " "){ e.preventDefault(); openPicker(); }
+  });
+  $("preview").addEventListener("click", function(e){
+    if (e.target && e.target.id === "pclear") return;
+    openPicker();
   });
   drop.addEventListener("dragover", function(e){ e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave", function(){ drop.classList.remove("over"); });
@@ -529,7 +585,8 @@ export function ui() {
     try { handleFiles(e.target.files); }
     finally { e.target.value = ""; } // тот же скриншот можно добавить повторно
   });
-  $("pclear").addEventListener("click", function(){
+  $("pclear").addEventListener("click", function(e){
+    if (e && e.stopPropagation) e.stopPropagation();
     state.image = null; $("preview").style.display = "none"; $("pimg").src = ""; $("go").disabled = true;
     fileInput.value = "";
     clearImageError();
@@ -663,9 +720,9 @@ export function ui() {
   (function(){
     var m = $("mode");
     if (!m) return;
-    var saved = localStorage.getItem("ca_mode");
+    var saved = storeGet("ca_mode");
     if (saved === "deep" || saved === "fast") m.value = saved;
-    m.addEventListener("change", function(){ localStorage.setItem("ca_mode", m.value); });
+    m.addEventListener("change", function(){ storeSet("ca_mode", m.value); });
   })();
 
   function analyze(){
@@ -1015,7 +1072,7 @@ export function ui() {
       return;
     }
     jf("GET", "/api/journal").then(function(res){
-      if (res.status === 401){ needKey(); useLocalJournal("нужен ключ доступа к серверному журналу"); loadJournal(); return; }
+      if (res.status === 401){ needKey(); useLocalJournal("нужен ключ доступа к серверному журналу"); loadJournal(); health(); return; }
       if (res.status === 503){ useLocalJournal("на сервере не подключён KV"); loadJournal(); return; }
       if (res.status === 0){
         $("jlist").innerHTML = '<div class="err">' + esc((res.body && res.body.error) || "Сеть недоступна") + "</div>";

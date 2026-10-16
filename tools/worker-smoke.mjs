@@ -95,6 +95,26 @@ const json = async (res) => {
   const d = await json(res);
   check("GET /api/health без ключа работает", res.status === 200 && d && d.ok === true, JSON.stringify(d));
   check("health сообщает про ключ и журнал", d && d.auth === true && d.journal === false, JSON.stringify(d));
+  check("health без ключа: keyValid=false (интерфейс покажет «нужен ключ»)", d && d.keyValid === false, JSON.stringify(d));
+}
+{
+  const res = await call("/api/health", { headers: { "X-Api-Key": "wrong-key" } });
+  const d = await json(res);
+  check("health с неверным ключом: keyValid=false, а не «онлайн»", res.status === 200 && d && d.keyValid === false, JSON.stringify(d));
+}
+{
+  const res = await call("/api/health", { headers: { "X-Api-Key": KEY } });
+  const d = await json(res);
+  check("health с верным ключом: keyValid=true", res.status === 200 && d && d.keyValid === true, JSON.stringify(d));
+}
+{
+  // Секрет залит с переводом строки на конце (echo | wrangler secret put):
+  // чистый пароль пользователя всё равно должен приниматься.
+  const env = { ACCESS_KEY: KEY + "\n", AI: fakeAI("ok") };
+  const res = await call("/api/journal", { headers: { "X-Api-Key": KEY } }, env);
+  check("ACCESS_KEY с \\n на конце принимает чистый пароль (не 401)", res.status === 503, "status=" + res.status);
+  const res2 = await call("/api/journal?key=%20" + KEY + "%20", {}, env);
+  check("ключ с пробелами в ?key= тоже принимается", res2.status === 503, "status=" + res2.status);
 }
 
 // --- журнал -----------------------------------------------------

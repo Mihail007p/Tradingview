@@ -180,6 +180,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, {
         ok: true, service: "pocket-options-analyst (local)", model: MODEL,
         journal: true, mode: LIVE ? "live" : "demo",
+        auth: false, keyValid: true,
       });
     }
 
