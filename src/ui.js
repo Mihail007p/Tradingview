@@ -412,6 +412,15 @@ export function ui() {
     return x.toFixed(d === undefined ? 2 : d);
   }
 
+  // Prices need instrument-scale precision: the generic money formatter's 2 decimals
+  // collapses forex levels such as 0.57283 and 0.57343 into the same misleading 0.57.
+  function fmtPrice(n){
+    if (n === null || n === undefined || isNaN(n)) return "—";
+    var x = Number(n), a = Math.abs(x);
+    var digits = a < 1 ? 5 : a < 100 ? 3 : 2;
+    return x.toFixed(digits);
+  }
+
   // ---------- tabs ----------
   Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(t){
     t.addEventListener("click", function(){
@@ -688,7 +697,7 @@ export function ui() {
 
     if (s.direction !== "none"){
       html += '<div class="kv">'
-        + '<div><span>Вход (цена)</span><b>' + fmt(s.entry) + "</b></div>"
+        + '<div><span>Вход (цена)</span><b>' + fmtPrice(s.entry) + "</b></div>"
         + '<div><span>Экспирация</span><b class="b">' + esc(s.expiry || "—") + "</b></div>"
         + '<div><span>Направление</span><b class="' + (s.direction === "call" ? "g" : "r") + '">' + (s.direction === "call" ? "CALL ↑" : "PUT ↓") + "</b></div>"
         + "</div>";
@@ -698,8 +707,8 @@ export function ui() {
     var res = (a.levels && a.levels.resistance) || [];
     if (sup.length || res.length){
       html += '<div class="kv">'
-        + '<div><span>Поддержка</span><b class="g">' + (sup.length ? sup.map(function(x){return fmt(x);}).join(" / ") : "—") + "</b></div>"
-        + '<div><span>Сопротивление</span><b class="r">' + (res.length ? res.map(function(x){return fmt(x);}).join(" / ") : "—") + "</b></div>"
+        + '<div><span>Поддержка</span><b class="g">' + (sup.length ? sup.map(function(x){return fmtPrice(x);}).join(" / ") : "—") + "</b></div>"
+        + '<div><span>Сопротивление</span><b class="r">' + (res.length ? res.map(function(x){return fmtPrice(x);}).join(" / ") : "—") + "</b></div>"
         + "</div>";
     }
 
@@ -1053,7 +1062,7 @@ export function ui() {
         + '<td style="color:var(--muted);font-size:12px">' + esc(date) + "</td>"
         + "<td><b>" + esc(t.instrument) + '</b><br><span style="color:var(--dim);font-size:11.5px">' + esc(t.timeframe) + "</span></td>"
         + '<td class="num ' + dirCls + '">' + (t.direction === "call" ? "ВВЕРХ" : "ВНИЗ") + "</td>"
-        + '<td class="num">' + fmt(t.entry) + "</td>"
+        + '<td class="num">' + fmtPrice(t.entry) + "</td>"
         + '<td class="num">' + esc(t.expiry || "—") + "</td>"
         + '<td class="num">$' + fmt(t.stake) + "</td>"
         + '<td class="num">' + (t.confidence ? t.confidence + "%" : "—") + "</td>"
