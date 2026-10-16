@@ -18,37 +18,31 @@ CFG="wrangler.toml"
 
 log() { echo "  $*" >&2; }
 
-# --- вытащить id неймспейса по title из JSON-массива -----------
+# --- читаем только успешные ответы Cloudflare REST API ---------
 extract_id() {
   TITLE="$TITLE" node -e '
     let s = "";
     process.stdin.on("data", d => (s += d)).on("end", () => {
       try {
-        const m = s.match(/\[[\s\S]*\]/);
-        const arr = JSON.parse(m ? m[0] : "[]");
-        const hit = (Array.isArray(arr) ? arr : []).find(x => x.title === process.env.TITLE);
-        if (hit && hit.id) { process.stdout.write(hit.id); }
+        const o = JSON.parse(s);
+        if (o.success !== true || !Array.isArray(o.result)) return;
+        const hit = o.result.find(x => x.title === process.env.TITLE);
+        if (hit && /^[0-9a-f]{32}$/.test(hit.id)) process.stdout.write(hit.id);
       } catch (_) {}
     });
   '
 }
 
-# --- вытащить id из ответа create ------------------------------
 extract_new_id() {
   node -e '
     let s = "";
     process.stdin.on("data", d => (s += d)).on("end", () => {
-      let id = "";
       try {
-        const m = s.match(/\{[\s\S]*\}/);
-        const o = JSON.parse(m ? m[0] : "{}");
-        id = o.id || "";
+        const o = JSON.parse(s);
+        if (o.success === true && o.result && /^[0-9a-f]{32}$/.test(o.result.id)) {
+          process.stdout.write(o.result.id);
+        }
       } catch (_) {}
-      if (!id) {
-        const m2 = s.match(/[0-9a-f]{32}/);
-        id = m2 ? m2[0] : "";
-      }
-      process.stdout.write(id);
     });
   '
 }
