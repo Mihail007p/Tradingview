@@ -741,8 +741,8 @@ export function ui() {
     };
     if (journalLocal){ lsAdd(trade); afterSave(); return; }
     jf("POST", "/api/journal", trade).then(function(res){
-      if (res.status === 401){ needKey(); useLocalJournal("нужен ключ доступа"); lsAdd(trade); afterSave(); return; }
-      if (res.status === 503){ useLocalJournal("KV не подключён"); lsAdd(trade); afterSave(); return; }
+      if (res.status === 401){ needKey(); useLocalJournal("нужен ключ доступа к серверному журналу"); lsAdd(trade); afterSave(); return; }
+      if (res.status === 503){ useLocalJournal("на сервере не подключён KV"); lsAdd(trade); afterSave(); return; }
       if (res.body && res.body.ok){ afterSave(); return; }
       alert("Ошибка сохранения: " + ((res.body && res.body.error) || "?"));
     });
@@ -759,7 +759,7 @@ export function ui() {
     if (journalLocal){ lsClose(id, price); loadJournal(); return; }
     jf("PATCH", "/api/journal?id=" + encodeURIComponent(id), { exitPrice: Number(price) }).then(function(res){
       if (res.status === 401 || res.status === 503){
-        useLocalJournal(res.status === 401 ? "нужен ключ доступа" : "KV не подключён");
+        useLocalJournal(res.status === 401 ? "нужен ключ доступа к серверному журналу" : "на сервере не подключён KV");
         lsClose(id, price); loadJournal(); return;
       }
       if (!res.body || !res.body.ok) alert("Ошибка: " + ((res.body && res.body.error) || "?"));
@@ -771,7 +771,7 @@ export function ui() {
     if (journalLocal){ lsRemove(id); loadJournal(); return; }
     jf("DELETE", "/api/journal?id=" + encodeURIComponent(id)).then(function(res){
       if (res.status === 401 || res.status === 503){
-        useLocalJournal(res.status === 401 ? "нужен ключ доступа" : "KV не подключён");
+        useLocalJournal(res.status === 401 ? "нужен ключ доступа к серверному журналу" : "на сервере не подключён KV");
         lsRemove(id); loadJournal(); return;
       }
       loadJournal();
@@ -782,7 +782,7 @@ export function ui() {
     if (journalLocal){ lsClear(); loadJournal(); return; }
     jf("DELETE", "/api/journal").then(function(res){
       if (res.status === 401 || res.status === 503){
-        useLocalJournal(res.status === 401 ? "нужен ключ доступа" : "KV не подключён");
+        useLocalJournal(res.status === 401 ? "нужен ключ доступа к серверному журналу" : "на сервере не подключён KV");
         lsClear();
       }
       loadJournal();
@@ -797,8 +797,10 @@ export function ui() {
     $("jcount").textContent = entries.length ? String(entries.length) : "";
 
     var note = journalLocal
-      ? '<div class="warn" style="margin-bottom:12px">Журнал хранится <b>локально в этом браузере</b>: '
-        + esc(journalReason) + ". Сделки не синхронизируются между устройствами.</div>"
+      ? '<div class="warn" style="margin-bottom:12px">Серверный журнал недоступен'
+        + (journalReason ? " (" + esc(journalReason) + ")" : "")
+        + ", поэтому сделки сохраняются <b>локально в этом браузере</b> "
+        + "и не синхронизируются между устройствами.</div>"
       : "";
 
     var s = stats || {};
@@ -893,8 +895,8 @@ export function ui() {
       return;
     }
     jf("GET", "/api/journal").then(function(res){
-      if (res.status === 401){ needKey(); useLocalJournal("нужен ключ доступа"); loadJournal(); return; }
-      if (res.status === 503){ useLocalJournal("KV не подключён"); loadJournal(); return; }
+      if (res.status === 401){ needKey(); useLocalJournal("нужен ключ доступа к серверному журналу"); loadJournal(); return; }
+      if (res.status === 503){ useLocalJournal("на сервере не подключён KV"); loadJournal(); return; }
       if (res.status === 0){
         $("jlist").innerHTML = '<div class="err">' + esc((res.body && res.body.error) || "Сеть недоступна") + "</div>";
         return;
