@@ -90,7 +90,9 @@ jobs:
             exit 0
           fi
           echo "Uploading ACCESS_KEY as a Cloudflare secret..."
-          echo "$ACCESS_KEY" | npx wrangler secret put ACCESS_KEY
+          # printf '%s' — без trailing newline: echo добавил бы \n в значение
+          # секрета, и введённый пользователем пароль не совпадал бы с ним.
+          printf '%s' "$ACCESS_KEY" | npx wrangler secret put ACCESS_KEY
 
       - name: Deploy
         if: github.event_name != 'pull_request'

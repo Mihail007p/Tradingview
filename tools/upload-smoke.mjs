@@ -238,9 +238,23 @@ fire($("drop"), "drop", {
 await tick();
 ok("drop через dataTransfer.items добавляет скриншот", $("preview").style.display === "block" && $("go").disabled === false);
 
-// 8) Клик по зоне открывает выбор файла
+// 8) Клик по зоне открывает выбор файла.
+// Зона загрузки — <label for="file">: диалог открывает САМ БРАУЗЕР, без JS.
+// Программный .click() по полю с display:none часть браузеров игнорирует —
+// клик выглядел как «ничего не происходит». Эмулируем поведение браузера:
+// клик по label активирует связанное поле файла.
 fire($("drop"), "click", { target: $("drop") });
+const labelLinked = /<label[^>]*id="drop"[^>]*for="file"/.test(source);
+const inputHiddenNotNone = !/#file\s*\{\s*display\s*:\s*none/.test(source);
+ok("зона загрузки связана с полем файла через <label for>", labelLinked);
+ok("поле файла не спрятано через display:none", inputHiddenNotNone);
+if (labelLinked) fileEl.click(); // нативная активация label браузером
 ok("клик по зоне загрузки открывает диалог файла", fileEl._clicks > 0);
+
+// 9) Enter по зоне (клавиатура) тоже открывает выбор файла — JS-путь
+const clicksBefore = fileEl._clicks;
+fire($("drop"), "keydown", { target: $("drop"), key: "Enter" });
+ok("Enter по зоне загрузки открывает диалог файла", fileEl._clicks > clicksBefore);
 
 const failed = checks.filter(([, c]) => !c).length;
 for (const [name, c] of checks) if (c) console.log("✔ " + name);
