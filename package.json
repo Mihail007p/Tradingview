@@ -10,7 +10,11 @@
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
     "preview": "node tools/dev-server.mjs",
-    "kv:create": "wrangler kv namespace create JOURNAL"
+    "kv:create": "wrangler kv namespace create JOURNAL",
+    "check:ui": "node tools/ui-smoke.mjs",
+    "check:worker": "node tools/worker-smoke.mjs",
+    "check": "npm run check:ui && npm run check:worker",
+    "test": "npm run check && python3 scripts/test-ensure-kv.py"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

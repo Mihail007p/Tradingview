@@ -53,6 +53,7 @@ export function ui() {
   .dot.ok{background:var(--green);box-shadow:0 0 0 4px rgba(38,208,124,.15)}
   .dot.bad{background:var(--red);box-shadow:0 0 0 4px rgba(255,92,108,.15)}
   .dot.load{background:var(--amber);animation:pulse 1s infinite}
+  .dot.warn{background:var(--amber);box-shadow:0 0 0 4px rgba(255,176,32,.15)}
   @keyframes pulse{50%{opacity:.35}}
 
   .tabs{display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--line);padding-bottom:0}
@@ -277,8 +278,11 @@ export function ui() {
   <!-- ============ JOURNAL ============ -->
   <section id="tab-journal" class="hide">
     <div class="card">
-      <h3>Статистика</h3>
-      <div class="tstats" id="stats"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <h3 style="margin:0">Статистика</h3>
+        <button class="mini danger" id="jclear">Очистить журнал</button>
+      </div>
+      <div class="tstats" id="stats" style="margin-top:12px"></div>
       <div id="jlist"></div>
     </div>
   </section>
@@ -293,23 +297,36 @@ export function ui() {
 (function(){
   "use strict";
 
+  function $(id){ return document.getElementById(id); }
+
   var API = location.origin;
   var KEY = new URLSearchParams(location.search).get("key") || localStorage.getItem("ca_key") || "";
   if (KEY) localStorage.setItem("ca_key", KEY);
   var state = { image:null, result:null, mode:"margin" };
 
   // ---------- access key field ----------
+  // ВАЖНО: $() объявлена выше — раньше вызов $("accessKey") шёл до её
+  // присваивания и весь скрипт падал с TypeError: $ is not a function,
+  // из-за чего кнопки/табы/журнал не работали вообще.
   var $key = $("accessKey");
+
+  function needKey(){
+    if (!$key) return;
+    $key.focus();
+    $key.placeholder = "Введи ключ доступа (иначе будет локальный режим)";
+    $key.style.borderColor = "var(--red)";
+    setTimeout(function(){ $key.style.borderColor = ""; }, 2500);
+  }
+
   if ($key) {
     $key.value = KEY;
     $key.addEventListener("input", function(){
       KEY = $key.value.trim();
       if (KEY) localStorage.setItem("ca_key", KEY);
       else localStorage.removeItem("ca_key");
+      health();
     });
   }
-
-  var $ = function(id){ return document.getElementById(id); };
 
   function hdr(extra){
     var h = { "Content-Type":"application/json" };
@@ -342,9 +359,18 @@ export function ui() {
     fetch(API + "/api/health", { headers: hdr() })
       .then(function(r){ return r.json(); })
       .then(function(d){
+        var model = (d.model || "").replace("@cf/meta/","");
+        if (journalLocal){
+          // статус уже показывает локальный журнал — не перетираем
+          $("dot").className = "dot warn";
+          $("status").textContent = "онлайн · " + model + " · журнал локально";
+          return;
+        }
         $("dot").className = "dot ok";
-        $("status").textContent = d.journal ? "онлайн · " + (d.model || "").replace("@cf/meta/","") : "KV не подключён";
-        if (!d.journal) $("dot").className = "dot bad";
+        $("status").textContent = d.journal
+          ? "онлайн · " + model
+          : "онлайн · журнал локально (KV не подключён)";
+        if (!d.journal) $("dot").className = "dot warn";
       })
       .catch(function(){
         $("dot").className = "dot bad";
@@ -555,12 +581,12 @@ export function ui() {
       .then(function(res){
         var d = res.body;
         if (!d.ok){
-          if (res.status === 401 && $key){
-            $key.focus();
-            $key.style.borderColor = "var(--red)";
-            setTimeout(function(){ $key.style.borderColor = ""; }, 2500);
+          if (res.status === 401){
+            needKey();
           }
-          var msg = '<div class="err"><b>Не удалось разобрать график</b><div style="margin-top:6px">'
+          var msg = '<div class="err"><b>'
+            + (res.status === 401 ? "Нужен ключ доступа" : "Не удалось разобрать график")
+            + '</b><div style="margin-top:6px">'
             + esc(d.error || "неизвестная ошибка") + "</div>";
           if (d.details && d.details.length){
             msg += "<pre>" + esc(d.details.join("\\n")) + "</pre>";
@@ -581,6 +607,121 @@ export function ui() {
   $("go").addEventListener("click", analyze);
 
   // ---------- journal ----------
+  // Журнал живёт на сервере (Cloudflare KV). Если KV не привязан или ключ
+  // доступа не подошёл — автоматически переключаемся на локальный журнал
+  // в localStorage, чтобы кнопка «Сохранить сделку» и статистика работали.
+  var LOCAL_KEY = "ca_journal_v1";
+  var journalLocal = false;
+  var journalReason = "";
+
+  function lsAll(){
+    try {
+      var a = JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]");
+      return Array.isArray(a) ? a : [];
+    } catch(_){ return []; }
+  }
+  function lsSorted(){
+    return lsAll().sort(function(a,b){ return (b.createdAt||0) - (a.createdAt||0); });
+  }
+  function lsPersist(entries){
+    try { localStorage.setItem(LOCAL_KEY, JSON.stringify(entries.slice(0,500))); } catch(_){}
+  }
+  // зеркало journalStats() из src/sizing.js
+  function lsStats(entries){
+    entries = entries || [];
+    var closed = entries.filter(function(e){ return e.status && e.status !== "open"; });
+    var wins = closed.filter(function(e){ return e.status === "win"; });
+    var losses = closed.filter(function(e){ return e.status === "loss"; });
+    var bes = closed.filter(function(e){ return e.status === "breakeven"; });
+    var rs = closed.map(function(e){ return Number(e.resultR); }).filter(function(x){ return isFinite(x); });
+    var totalR = rs.reduce(function(a,x){ return a+x; }, 0);
+    var pnl = closed.map(function(e){ return Number(e.resultPnl); }).filter(function(x){ return isFinite(x); });
+    var totalPnl = pnl.reduce(function(a,x){ return a+x; }, 0);
+    var avgWin = wins.length ? wins.reduce(function(a,e){ return a + Number(e.resultR||0); },0)/wins.length : 0;
+    var avgLoss = losses.length ? losses.reduce(function(a,e){ return a + Number(e.resultR||0); },0)/losses.length : 0;
+    var r2 = function(x){ return Math.round(x*100)/100; };
+    return {
+      total: entries.length,
+      open: entries.filter(function(e){ return e.status === "open"; }).length,
+      closed: closed.length,
+      wins: wins.length,
+      losses: losses.length,
+      breakeven: bes.length,
+      winRate: closed.length ? r2((wins.length/closed.length)*100) : 0,
+      totalR: r2(totalR),
+      totalPnl: r2(totalPnl),
+      avgR: closed.length ? r2(totalR/closed.length) : 0,
+      avgWin: r2(avgWin),
+      avgLoss: r2(avgLoss),
+      expectancy: closed.length ? r2(totalR/closed.length) : 0,
+      bestR: rs.length ? Math.max.apply(null, rs) : 0,
+      worstR: rs.length ? Math.min.apply(null, rs) : 0
+    };
+  }
+  function newLocalId(){
+    return "l_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2,7);
+  }
+  function lsAdd(trade){
+    var rec = { id: newLocalId(), status: "open", createdAt: Date.now() };
+    for (var k in trade) if (trade[k] !== undefined) rec[k] = trade[k];
+    rec.status = "open";
+    var all = lsAll();
+    all.unshift(rec);
+    lsPersist(all);
+    return rec;
+  }
+  // зеркало computeClose() из src/sizing.js
+  function lsClose(id, exitPrice){
+    var exit = Number(exitPrice);
+    var all = lsAll();
+    for (var i=0;i<all.length;i++){
+      if (all[i].id !== id) continue;
+      var t = all[i];
+      var entry = Number(t.entry), stop = Number(t.stop_loss);
+      if (!isFinite(entry) || !isFinite(stop) || !isFinite(exit) || entry === stop) return false;
+      var dir = t.direction === "short" ? -1 : 1;
+      var risk = Math.abs(entry - stop);
+      var resultR = Math.round(((exit - entry) * dir / risk) * 100) / 100;
+      var qty = Number(t.qty) || 0;
+      var resultPnl = Math.round((exit - entry) * dir * qty * 100) / 100;
+      t.exitPrice = exit;
+      t.status = resultR > 0.05 ? "win" : resultR < -0.05 ? "loss" : "breakeven";
+      t.resultR = resultR;
+      t.resultPnl = resultPnl;
+      t.closedAt = Date.now();
+      lsPersist(all);
+      return true;
+    }
+    return false;
+  }
+  function lsRemove(id){
+    lsPersist(lsAll().filter(function(t){ return t.id !== id; }));
+  }
+  function lsClear(){ lsPersist([]); }
+
+  function useLocalJournal(reason){
+    if (journalLocal) return;
+    journalLocal = true;
+    journalReason = reason || "серверный журнал недоступен";
+    var $st = $("status");
+    if ($st) $st.textContent = "журнал локально · " + journalReason;
+    var $dot = $("dot");
+    if ($dot) $dot.className = "dot warn";
+  }
+
+  // один общий запрос: всегда отдаёт { status, body }, без падений на не-JSON
+  function jf(method, url, body){
+    var opts = { method: method || "GET", headers: hdr() };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    return fetch(API + url, opts)
+      .then(function(r){
+        return r.json()
+          .catch(function(){ return { ok:false, error:"Сервер вернул не JSON (HTTP " + r.status + ")" }; })
+          .then(function(j){ return { status: r.status, body: j }; });
+      })
+      .catch(function(e){ return { status: 0, body: { ok:false, error:"Сеть недоступна: " + e } }; });
+  }
+
   function saveTrade(a, sizing){
     var trade = {
       instrument: a.instrument || "—",
@@ -598,18 +739,54 @@ export function ui() {
       riskPct: Number($("risk").value) || null,
       summary: a.summary || ""
     };
-    fetch(API + "/api/journal", { method:"POST", headers: hdr(), body: JSON.stringify(trade) })
-      .then(function(r){ return r.json(); })
-      .then(function(j){
-        if (j.ok){
-          loadJournal();
-          Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(t){
-            if (t.getAttribute("data-tab") === "journal") t.click();
-          });
-        } else {
-          alert("Ошибка сохранения: " + (j.error || "?"));
-        }
-      });
+    if (journalLocal){ lsAdd(trade); afterSave(); return; }
+    jf("POST", "/api/journal", trade).then(function(res){
+      if (res.status === 401){ needKey(); useLocalJournal("нужен ключ доступа"); lsAdd(trade); afterSave(); return; }
+      if (res.status === 503){ useLocalJournal("KV не подключён"); lsAdd(trade); afterSave(); return; }
+      if (res.body && res.body.ok){ afterSave(); return; }
+      alert("Ошибка сохранения: " + ((res.body && res.body.error) || "?"));
+    });
+  }
+
+  function afterSave(){
+    loadJournal();
+    Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(t){
+      if (t.getAttribute("data-tab") === "journal") t.click();
+    });
+  }
+
+  function closeTrade(id, price){
+    if (journalLocal){ lsClose(id, price); loadJournal(); return; }
+    jf("PATCH", "/api/journal?id=" + encodeURIComponent(id), { exitPrice: Number(price) }).then(function(res){
+      if (res.status === 401 || res.status === 503){
+        useLocalJournal(res.status === 401 ? "нужен ключ доступа" : "KV не подключён");
+        lsClose(id, price); loadJournal(); return;
+      }
+      if (!res.body || !res.body.ok) alert("Ошибка: " + ((res.body && res.body.error) || "?"));
+      else loadJournal();
+    });
+  }
+
+  function delTrade(id){
+    if (journalLocal){ lsRemove(id); loadJournal(); return; }
+    jf("DELETE", "/api/journal?id=" + encodeURIComponent(id)).then(function(res){
+      if (res.status === 401 || res.status === 503){
+        useLocalJournal(res.status === 401 ? "нужен ключ доступа" : "KV не подключён");
+        lsRemove(id); loadJournal(); return;
+      }
+      loadJournal();
+    });
+  }
+
+  function clearJournal(){
+    if (journalLocal){ lsClear(); loadJournal(); return; }
+    jf("DELETE", "/api/journal").then(function(res){
+      if (res.status === 401 || res.status === 503){
+        useLocalJournal(res.status === 401 ? "нужен ключ доступа" : "KV не подключён");
+        lsClear();
+      }
+      loadJournal();
+    });
   }
 
   function statCard(label, value, cls){
@@ -619,9 +796,14 @@ export function ui() {
   function renderJournal(entries, stats){
     $("jcount").textContent = entries.length ? String(entries.length) : "";
 
+    var note = journalLocal
+      ? '<div class="warn" style="margin-bottom:12px">Журнал хранится <b>локально в этом браузере</b>: '
+        + esc(journalReason) + ". Сделки не синхронизируются между устройствами.</div>"
+      : "";
+
     var s = stats || {};
-    $("stats").innerHTML =
-        statCard("Сделок", s.total || 0)
+    $("stats").innerHTML = note
+      + statCard("Сделок", s.total || 0)
       + statCard("Открыто", s.open || 0, "b")
       + statCard("Винрейт", (s.closed ? (s.winRate + "%") : "—"), s.winRate >= 50 ? "g" : "a")
       + statCard("Прибыль", (s.wins || 0) + " / " + (s.losses || 0))
@@ -692,37 +874,45 @@ export function ui() {
           var dev = Math.abs(Number(price) - entryNum) / entryNum;
           if (dev > 0.5 && !confirm("Цена выхода отличается от входа больше чем на 50%. Точно продолжить?")) return;
         }
-        fetch(API + "/api/journal?id=" + encodeURIComponent(id), {
-          method:"PATCH", headers: hdr(), body: JSON.stringify({ exitPrice: Number(price) })
-        }).then(function(r){ return r.json(); }).then(function(j){
-          if (!j.ok) alert("Ошибка: " + (j.error || "?")); else loadJournal();
-        });
+        closeTrade(id, price);
       });
     });
 
     Array.prototype.forEach.call(document.querySelectorAll("[data-del]"), function(b){
       b.addEventListener("click", function(){
         if (!confirm("Удалить сделку из журнала?")) return;
-        fetch(API + "/api/journal?id=" + encodeURIComponent(b.getAttribute("data-del")), {
-          method:"DELETE", headers: hdr()
-        }).then(function(r){ return r.json(); }).then(loadJournal);
+        delTrade(b.getAttribute("data-del"));
       });
     });
   }
 
   function loadJournal(){
-    fetch(API + "/api/journal", { headers: hdr() })
-      .then(function(r){ return r.json(); })
-      .then(function(j){
-        if (j.ok) renderJournal(j.entries || [], j.stats);
-        else $("jlist").innerHTML = '<div class="err">' + esc(j.error) + "</div>";
-      })
-      .catch(function(e){
-        $("jlist").innerHTML = '<div class="err">Не удалось загрузить журнал: ' + esc(String(e)) + "</div>";
-      });
+    if (journalLocal){
+      var local = lsSorted();
+      renderJournal(local, lsStats(local));
+      return;
+    }
+    jf("GET", "/api/journal").then(function(res){
+      if (res.status === 401){ needKey(); useLocalJournal("нужен ключ доступа"); loadJournal(); return; }
+      if (res.status === 503){ useLocalJournal("KV не подключён"); loadJournal(); return; }
+      if (res.status === 0){
+        $("jlist").innerHTML = '<div class="err">' + esc((res.body && res.body.error) || "Сеть недоступна") + "</div>";
+        return;
+      }
+      if (res.body && res.body.ok) renderJournal(res.body.entries || [], res.body.stats);
+      else $("jlist").innerHTML = '<div class="err">' + esc((res.body && res.body.error) || "Не удалось загрузить журнал") + "</div>";
+    });
   }
 
   loadJournal();
+
+  // ---------- clear journal ----------
+  var $jclear = $("jclear");
+  if ($jclear){
+    $jclear.addEventListener("click", function(){
+      if (confirm("Очистить весь журнал? Действие необратимо.")) clearJournal();
+    });
+  }
 })();
 </script>
 </body>
