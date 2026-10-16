@@ -4,7 +4,7 @@
  * Routes:
  *   GET  /                 -> web UI
  *   GET  /api/health       -> status
- *   POST /api/analyze      -> { image (data URI), question, market, mode, balance, riskPct }
+ *   POST /api/analyze      -> { image (data URI), question, market, expiry, payout, balance, stakePct }
  *   GET  /api/journal      -> list trades + stats
  *   POST /api/journal      -> add trade
  *   PATCH /api/journal/:id -> update (close) trade
@@ -13,9 +13,9 @@
  */
 
 import { ui } from "./ui.js";
-import { analyzeChart, DEFAULT_MODEL } from "./ai.js";
+import { analyzeChart, DEFAULT_MODEL, normalizeExpiry } from "./ai.js";
 import { createJournal } from "./journal.js";
-import { sizePosition, journalStats, computeClose } from "./sizing.js";
+import { sizeStake, journalStats, computeClose, normalizeDirection, DEFAULT_PAYOUT } from "./sizing.js";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -72,22 +72,20 @@ async function handleAnalyze(request, env) {
     bytes,
     question: String(body.question || "").slice(0, 500),
     market: String(body.market || "").slice(0, 60),
-    mode: body.mode === "spot" ? "spot" : "margin",
+    expiry: normalizeExpiry(body.expiry) || null,
+    payout: Number(body.payout) || DEFAULT_PAYOUT,
     balance: body.balance,
-    riskPct: body.riskPct,
+    stakePct: body.stakePct,
   };
 
   try {
     const { data, model } = await analyzeChart(env, opts);
     const sizing =
       data.signal.direction !== "none"
-        ? sizePosition({
+        ? sizeStake({
             balance: Number(opts.balance) || 0,
-            riskPct: Number(opts.riskPct) || 0,
-            mode: opts.mode,
-            entry: data.signal.entry,
-            stop: data.signal.stop_loss,
-            targets: data.signal.take_profits,
+            stakePct: Number(opts.stakePct) || 0,
+            payout: opts.payout,
           })
         : null;
 
@@ -142,17 +140,14 @@ async function handleJournal(request, env) {
     const trade = {
       instrument: String(body.instrument || "—").slice(0, 40),
       timeframe: String(body.timeframe || "—").slice(0, 20),
-      direction: body.direction === "short" ? "short" : "long",
+      direction: normalizeDirection(body.direction),
       entry: Number(body.entry) || null,
-      stop_loss: Number(body.stop_loss) || null,
-      take_profits: Array.isArray(body.take_profits) ? body.take_profits.map(Number) : [],
-      risk_reward: Number(body.risk_reward) || null,
+      expiry: normalizeExpiry(body.expiry),
       confidence: Number(body.confidence) || null,
-      qty: Number(body.qty) || null,
-      notional: Number(body.notional) || null,
-      leverage: Number(body.leverage) || null,
+      stake: Number(body.stake) || null,
+      payout: Number(body.payout) || DEFAULT_PAYOUT,
       balance: Number(body.balance) || null,
-      riskPct: Number(body.riskPct) || null,
+      stakePct: Number(body.stakePct) || null,
       summary: String(body.summary || "").slice(0, 1000),
       status: "open",
       notes: String(body.notes || "").slice(0, 500),

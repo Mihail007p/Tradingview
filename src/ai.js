@@ -1,22 +1,30 @@
 /**
- * Workers AI vision layer.
- * Sends a chart screenshot to a multimodal model and gets back STRICT JSON.
+ * Workers AI vision layer — адаптировано под Pocket Options (бинарные опционы).
+ * Отправляет скриншот графика в мультимодальную модель и получает СТРОГИЙ JSON.
  */
 
 export const DEFAULT_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
 export const FALLBACK_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 
-const SYSTEM_PROMPT = `You are a professional trading desk analyst (technical analysis only).
-You read a chart screenshot from a terminal (TradingView / exchange / broker) and return a strict JSON verdict.
+/** Экспирации, которые есть в Pocket Options (ключ → подпись). */
+export const EXPIRIES = ["15s", "30s", "1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h"];
+
+const SYSTEM_PROMPT = `You are a professional binary-options analyst for Pocket Options (technical analysis only).
+You read a chart screenshot from the Pocket Options terminal and return a strict JSON verdict.
+Binary options: the trader buys "CALL" (price will be HIGHER than the entry price at expiry)
+or "PUT" (price will be LOWER than the entry price at expiry). There is no stop-loss and no take-profit:
+the result is decided only by the price at the expiry moment compared with the entry price.
 
 HARD RULES:
 1. Return ONLY a single valid JSON object. No markdown, no code fences, no commentary before or after.
 2. All human-readable text fields MUST be in Russian.
 3. All numeric fields MUST be JSON numbers (not strings). If a value is unknown or not applicable, use null.
-4. Never invent a setup that is not visible. If the chart is unclear, unreadable, or there is no edge,
-   return direction = "none" and say so honestly in "summary".
-5. Read price levels from the visible price axis as precisely as you can. Do not guess wildly.
-6. Confidence must reflect genuine uncertainty: 0-100 integer.
+4. Never invent a setup that is not visible. If the chart is unclear, unreadable, choppy, or there is no edge,
+   return direction = "none" and say so honestly in "summary". Choosing "none" is a valid and good answer.
+5. Read the current price from the visible price axis / last candle as precisely as you can.
+6. Pick expiry from this list only: 15s, 30s, 1m, 2m, 3m, 5m, 10m, 15m, 30m, 1h. Prefer an expiry that is
+   at least 2-3 candles of the visible timeframe, so the move has time to develop.
+7. Confidence must reflect genuine uncertainty: 0-100 integer. Be conservative: confidence above 75 is rare.
 
 SCHEMA:
 {
@@ -34,13 +42,11 @@ SCHEMA:
   "patterns": [string],
   "indicators": [string],
   "signal": {
-    "direction": "long"|"short"|"none",
+    "direction": "call"|"put"|"none",
     "entry": number|null,
-    "stop_loss": number|null,
-    "take_profits": [number, number, number],
-    "risk_reward": number|null,
+    "expiry": "15s"|"30s"|"1m"|"2m"|"3m"|"5m"|"10m"|"15m"|"30m"|"1h"|null,
     "confidence": number,
-    "horizon": string|null
+    "reason": string|null
   },
   "risks": [string],
   "invalidations": [string],
@@ -49,17 +55,14 @@ SCHEMA:
 
 function userPrompt(ctx) {
   const lines = [
-    "Разбери этот график и верни JSON строго по схеме из системного промпта.",
+    "Разбери этот график Pocket Options и верни JSON строго по схеме из системного промпта.",
     "",
-    `Режим торговли: ${ctx.mode === "spot" ? "спот (без плеча)" : "фьючерсы / маржа (плечо доступно)"}.`,
-    `Рынок (если известен): ${ctx.market || "не указан, определи сам по графику"}.`,
+    `Актив (если известен): ${ctx.market || "не указан, определи сам по графику"}.`,
+    `Экспирация, которую хочет трейдер: ${ctx.expiry ? ctx.expiry : "не задана — выбери сам по графику"}.`,
   ];
 
-  if (ctx.balance && ctx.riskPct) {
-    lines.push(
-      `Трейдер рискует ${ctx.riskPct}% от депозита ${ctx.balance} на сделку. ` +
-        "Учитывай это: ставь стоп по структуре рынка, а не подгоняй под депозит."
-    );
+  if (ctx.payout) {
+    lines.push(`Выплата брокера при выигрыше: ${ctx.payout}% (учитывай при оценке, но не подгоняй под неё вывод).`);
   }
 
   if (ctx.question && ctx.question.trim()) {
@@ -68,11 +71,12 @@ function userPrompt(ctx) {
 
   lines.push(
     "",
-    "Требования к стопу и целям:",
-    "- stop_loss должен лежать за ближайшей структурной точкой (swing high/low, граница диапазона, уровень), а не произвольно.",
-    "- take_profits должны быть у реальных зон ликвидности / уровней / границ диапазона.",
-    "- risk_reward считай по первому тейку: (|target1 - entry| / |entry - stop_loss|), округли до 2 знаков.",
-    "- Если направление none, все поля signal кроме direction и confidence ставь в null."
+    "Требования к сигналу:",
+    "- direction = call, если ожидаем рост цены к моменту экспирации; put, если падение; none, если нет чёткого преимущества.",
+    "- entry = текущая цена на графике (цена входа; результат сравнивается с ней при экспирации).",
+    "- expiry = экспирация из допустимого списка, согласованная с выбранным таймфреймом.",
+    "- Не давай сигнал против явного сильного тренда без признаков разворота и не давай сигнал прямо на новостном импульсе.",
+    "- Если direction = none, поля entry и expiry ставь в null, а reason объясни."
   );
 
   return lines.join("\n");
@@ -153,6 +157,20 @@ export function extractJson(raw) {
   }
 }
 
+/** Приводит подписи вроде "1 мин", "5 min", "30 sec", "1 hour" к ключам из EXPIRIES. */
+export function normalizeExpiry(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim().toLowerCase().replace(/\s+/g, "");
+  if (!s) return null;
+  if (EXPIRIES.includes(s)) return s;
+  const m = /^(\d+)(s|sec|secs|seconds?|сек|с|m|min|mins|minutes?|мин|м|h|hr|hrs|hours?|час|ч)$/.exec(s);
+  if (!m) return null;
+  const n = Number(m[1]);
+  const unit = m[2][0];
+  const canon = unit === "s" ? `${n}s` : unit === "h" ? `${n}h` : `${n}m`;
+  return EXPIRIES.includes(canon) ? canon : null;
+}
+
 /** Coerce the model output into the shape the UI expects. */
 export function normalize(rawObj) {
   const o = rawObj && typeof rawObj === "object" ? rawObj : {};
@@ -167,20 +185,20 @@ export function normalize(rawObj) {
 
   const arr = (v) => (Array.isArray(v) ? v : []).filter((x) => x !== null && x !== undefined && x !== "");
 
+  // модель может написать long/short или up/down — приводим к call/put
   let direction = String(sig.direction ?? "none").toLowerCase();
-  if (!["long", "short", "none"].includes(direction)) direction = "none";
+  if (["long", "up", "higher", "вверх", "колл"].includes(direction)) direction = "call";
+  if (["short", "down", "lower", "вниз", "пут"].includes(direction)) direction = "put";
+  if (!["call", "put", "none"].includes(direction)) direction = "none";
 
   let trend = o.trend ? String(o.trend).toLowerCase() : null;
   if (!["uptrend", "downtrend", "sideways"].includes(trend)) trend = null;
 
-  const entry = num(sig.entry);
-  const stop = num(sig.stop_loss);
-  const targets = arr(sig.take_profits).map(num).filter((x) => x !== null).slice(0, 3);
-
-  let rr = num(sig.risk_reward);
-  if (rr === null && entry !== null && stop !== null && targets.length > 0) {
-    const risk = Math.abs(entry - stop);
-    if (risk > 0) rr = Math.round((Math.abs(targets[0] - entry) / risk) * 100) / 100;
+  let entry = num(sig.entry);
+  let expiry = normalizeExpiry(sig.expiry);
+  if (direction === "none") {
+    entry = null;
+    expiry = null;
   }
 
   let confidence = num(sig.confidence);
@@ -204,11 +222,9 @@ export function normalize(rawObj) {
     signal: {
       direction,
       entry,
-      stop_loss: stop,
-      take_profits: targets,
-      risk_reward: rr,
+      expiry,
       confidence,
-      horizon: sig.horizon ? String(sig.horizon) : null,
+      reason: sig.reason ? String(sig.reason) : null,
     },
     risks: arr(o.risks).map(String).slice(0, 5),
     invalidations: arr(o.invalidations).map(String).slice(0, 5),
@@ -217,9 +233,9 @@ export function normalize(rawObj) {
 }
 
 export async function analyzeChart(env, opts) {
-  const { dataUri, bytes, question, market, mode, balance, riskPct } = opts;
+  const { dataUri, bytes, question, market, expiry, payout } = opts;
 
-  const promptText = userPrompt({ question, market, mode, balance, riskPct });
+  const promptText = userPrompt({ question, market, expiry, payout });
   const primary = env.VISION_MODEL || DEFAULT_MODEL;
   const models = [primary];
   if (primary !== FALLBACK_MODEL) models.push(FALLBACK_MODEL);

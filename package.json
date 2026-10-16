@@ -13,7 +13,8 @@
     "kv:create": "wrangler kv namespace create JOURNAL",
     "check:ui": "node tools/ui-smoke.mjs",
     "check:worker": "node tools/worker-smoke.mjs",
-    "check": "npm run check:ui && npm run check:worker",
+    "check:math": "node tools/math-smoke.mjs",
+    "check": "npm run check:ui && npm run check:math && npm run check:worker",
     "test": "npm run check && python3 scripts/test-ensure-kv.py"
   },
   "devDependencies": {
