@@ -42,6 +42,13 @@ export function ui() {
     display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);
     background:var(--panel);border:1px solid var(--line);padding:6px 11px;border-radius:999px
   }
+  .keypill{
+    font:inherit;font-size:12px;color:var(--text);
+    background:var(--panel);border:1px solid var(--line);padding:6px 11px;border-radius:999px;
+    width:180px;outline:none
+  }
+  .keypill::placeholder{color:var(--dim)}
+  .keypill:focus{border-color:var(--blue)}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--dim)}
   .dot.ok{background:var(--green);box-shadow:0 0 0 4px rgba(38,208,124,.15)}
   .dot.bad{background:var(--red);box-shadow:0 0 0 4px rgba(255,92,108,.15)}
@@ -193,6 +200,7 @@ export function ui() {
       <div class="sub">ИИ-разбор торговых графиков · Cloudflare Workers AI</div>
     </div>
     <div class="spacer"></div>
+    <input id="accessKey" type="password" class="keypill" placeholder="Ключ доступа" autocomplete="off" spellcheck="false">
     <div class="pill"><i class="dot" id="dot"></i><span id="status">проверка…</span></div>
   </header>
 
@@ -289,6 +297,17 @@ export function ui() {
   var KEY = new URLSearchParams(location.search).get("key") || localStorage.getItem("ca_key") || "";
   if (KEY) localStorage.setItem("ca_key", KEY);
   var state = { image:null, result:null, mode:"margin" };
+
+  // ---------- access key field ----------
+  var $key = $("accessKey");
+  if ($key) {
+    $key.value = KEY;
+    $key.addEventListener("input", function(){
+      KEY = $key.value.trim();
+      if (KEY) localStorage.setItem("ca_key", KEY);
+      else localStorage.removeItem("ca_key");
+    });
+  }
 
   var $ = function(id){ return document.getElementById(id); };
 
@@ -536,6 +555,11 @@ export function ui() {
       .then(function(res){
         var d = res.body;
         if (!d.ok){
+          if (res.status === 401 && $key){
+            $key.focus();
+            $key.style.borderColor = "var(--red)";
+            setTimeout(function(){ $key.style.borderColor = ""; }, 2500);
+          }
           var msg = '<div class="err"><b>Не удалось разобрать график</b><div style="margin-top:6px">'
             + esc(d.error || "неизвестная ошибка") + "</div>";
           if (d.details && d.details.length){
