@@ -57,7 +57,7 @@ KV_ID=""
 
 # 1. Ищем существующий
 log "ищем KV-неймспейс '$TITLE'..."
-LIST="$(npx --yes wrangler kv namespace list --json 2>/dev/null || true)"
+LIST="$(curl -sS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" 2>/dev/null || true)"
 if [ -n "$LIST" ]; then
   KV_ID="$(printf '%s' "$LIST" | extract_id)"
 fi
@@ -65,7 +65,7 @@ fi
 # 2. Если нет — создаём
 if [ -z "$KV_ID" ]; then
   log "не найден, создаём..."
-  OUT="$(npx --yes wrangler kv namespace create "$TITLE" --json 2>&1 || true)"
+  OUT="$(curl -sS -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data "{\"title\":\"$TITLE\"}" 2>&1 || true)"
   KV_ID="$(printf '%s' "$OUT" | extract_new_id)"
 fi
 

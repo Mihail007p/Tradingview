@@ -286,7 +286,8 @@ export function ui() {
   "use strict";
 
   var API = location.origin;
-  var KEY = localStorage.getItem("ca_key") || "";
+  var KEY = new URLSearchParams(location.search).get("key") || localStorage.getItem("ca_key") || "";
+  if (KEY) localStorage.setItem("ca_key", KEY);
   var state = { image:null, result:null, mode:"margin" };
 
   var $ = function(id){ return document.getElementById(id); };
