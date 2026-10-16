@@ -76,6 +76,7 @@ export function ui() {
     cursor:pointer;transition:.15s;background:var(--panel2)
   }
   .drop:hover,.drop.over{border-color:var(--blue);background:rgba(76,141,255,.07)}
+  .drop:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
   .drop .ico{font-size:28px;margin-bottom:8px;opacity:.85}
   .drop b{display:block;font-size:14px}
   .drop span{color:var(--muted);font-size:12px}
@@ -216,16 +217,18 @@ export function ui() {
       <div>
         <div class="card">
           <h3>Скриншот графика</h3>
-          <div class="drop" id="drop">
+          <div class="drop" id="drop" role="button" tabindex="0" aria-label="Добавить скриншот графика">
             <div class="ico">🖼️</div>
             <b>Перетащи сюда скриншот</b>
             <span>или кликни · или вставь Ctrl+V</span>
+            <span style="display:block;margin-top:4px">PNG, JPG или WebP</span>
           </div>
           <input type="file" id="file" accept="image/*">
           <div class="preview" id="preview">
             <img id="pimg" alt="предпросмотр">
             <button id="pclear" title="Убрать">✕</button>
           </div>
+          <div class="err hide" id="imgmsg" role="alert" style="margin-top:10px"></div>
         </div>
 
         <div class="card">
@@ -399,31 +402,67 @@ export function ui() {
   health();
 
   // ---------- image input ----------
-  function resizeImage(file, cb){
+  // Раньше добавление скриншота падало молча сразу в нескольких местах,
+  // и пользователь видел только «ничего не произошло»:
+  //  1) <input type=file> не сбрасывался: после удаления скриншота (✕)
+  //     повторный выбор ТОГО ЖЕ файла не вызывал change — добавить заново
+  //     было нельзя;
+  //  2) у скриншотов из перетаскивания/буфера обмена MIME-тип часто пуст —
+  //     такой файл молча отбрасывался проверкой f.type;
+  //  3) при ошибке декодирования (HEIC и т.п.) исходник уходил в модель
+  //     как есть, превью не показывалось, а ошибки не было видно.
+  // Теперь каждое падение показывает понятную подсказку в #imgmsg.
+  function showImageError(msg){
+    var box = $("imgmsg");
+    if (!box) return;
+    box.textContent = msg;
+    box.classList.remove("hide");
+  }
+  function clearImageError(){
+    var box = $("imgmsg");
+    if (!box) return;
+    box.textContent = "";
+    box.classList.add("hide");
+  }
+
+  function looksLikeImage(f){
+    if (!f) return false;
+    if (f.type && f.type.indexOf("image/") === 0) return true;
+    if (/\.(png|jpe?g|webp|gif|bmp|avif|heic|heif)$/i.test(String(f.name || ""))) return true;
+    // тип пуст (drag-and-drop, буфер обмена) — даём шанс декодировщику
+    return !f.type || f.type === "application/octet-stream";
+  }
+
+  function resizeImage(file, cb, eb){
     var reader = new FileReader();
     reader.onload = function(e){
+      var original = e.target && e.target.result;
+      if (!original){ if (eb) eb(new Error("empty read")); return; }
       var img = new Image();
       img.onload = function(){
-        // 1280px достаточно для читаемости графика, но заметно быстрее для
-        // vision-модели, чем большие скриншоты (меньше пикселей → быстрее предобработка).
-        var MAX = 1280;
-        var w = img.width, h = img.height;
-        var scale = Math.min(1, MAX / Math.max(w, h));
-        var cw = Math.round(w*scale), ch = Math.round(h*scale);
-        var c = document.createElement("canvas");
-        c.width = cw; c.height = ch;
-        var ctx = c.getContext("2d");
-        ctx.fillStyle = "#000"; ctx.fillRect(0,0,cw,ch);
-        ctx.drawImage(img, 0, 0, cw, ch);
-        cb(c.toDataURL("image/jpeg", 0.82));
+        try {
+          // 1280px достаточно для читаемости графика, но заметно быстрее для
+          // vision-модели, чем большие скриншоты (меньше пикселей → быстрее предобработка).
+          var MAX = 1280;
+          var w = img.width, h = img.height;
+          if (!w || !h) throw new Error("zero size");
+          var scale = Math.min(1, MAX / Math.max(w, h));
+          var cw = Math.max(1, Math.round(w*scale)), ch = Math.max(1, Math.round(h*scale));
+          var c = document.createElement("canvas");
+          c.width = cw; c.height = ch;
+          var ctx = c.getContext && c.getContext("2d");
+          if (!ctx){ cb(original); return; }
+          ctx.fillStyle = "#000"; ctx.fillRect(0,0,cw,ch);
+          ctx.drawImage(img, 0, 0, cw, ch);
+          cb(c.toDataURL("image/jpeg", 0.82));
+        } catch (err) {
+          if (eb) eb(err);
+        }
       };
-      img.onerror = function(){
-        var r2 = new FileReader();
-        r2.onload = function(ev){ cb(ev.target.result); };
-        r2.readAsDataURL(file);
-      };
-      img.src = e.target.result;
+      img.onerror = function(){ if (eb) eb(new Error("decode failed")); };
+      img.src = original;
     };
+    reader.onerror = function(){ if (eb) eb(new Error("read failed")); };
     reader.readAsDataURL(file);
   }
 
@@ -432,40 +471,89 @@ export function ui() {
     $("pimg").src = dataUri;
     $("preview").style.display = "block";
     $("go").disabled = false;
+    clearImageError();
+  }
+
+  function rejectImage(){
+    state.image = null;
+    $("preview").style.display = "none";
+    $("pimg").src = "";
+    $("go").disabled = true;
+    showImageError("Не удалось прочитать эту картинку. Если это HEIC/HEIF с телефона — " +
+      "пересохрани её как PNG или JPG (или сделай скриншот заново) и попробуй ещё раз.");
   }
 
   function handleFiles(files){
-    if (!files || !files.length) return;
-    var f = files[0];
-    if (!f.type || f.type.indexOf("image/") !== 0) return;
-    resizeImage(f, setImage);
+    var f = files && files[0];
+    if (!f) return;
+    if (f.size === 0){
+      showImageError("Файл пустой — скриншот не сохранился. Сделай скриншот ещё раз.");
+      return;
+    }
+    if (!looksLikeImage(f)){
+      showImageError("Это не картинка" + (f.type ? " (" + f.type + ")" : "") +
+        ". Нужен скриншот графика в формате PNG, JPG или WebP.");
+      return;
+    }
+    clearImageError();
+    resizeImage(f, setImage, rejectImage);
   }
 
   var drop = $("drop");
-  drop.addEventListener("click", function(){ $("file").click(); });
+  var fileInput = $("file");
+  function openPicker(){
+    // сброс ДО открытия: иначе повторный выбор того же файла не даст change
+    fileInput.value = "";
+    fileInput.click();
+  }
+  drop.addEventListener("click", openPicker);
+  drop.addEventListener("keydown", function(e){
+    if (e.key === "Enter" || e.key === " "){ e.preventDefault(); openPicker(); }
+  });
   drop.addEventListener("dragover", function(e){ e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave", function(){ drop.classList.remove("over"); });
   drop.addEventListener("drop", function(e){
     e.preventDefault(); drop.classList.remove("over");
-    handleFiles(e.dataTransfer.files);
+    var files = e.dataTransfer && e.dataTransfer.files;
+    if ((!files || !files.length) && e.dataTransfer && e.dataTransfer.items){
+      // часть браузеров отдаёт перетащенную картинку только через items
+      files = [];
+      for (var i=0;i<e.dataTransfer.items.length;i++){
+        var it = e.dataTransfer.items[i];
+        if (it.kind === "file"){ var got = it.getAsFile && it.getAsFile(); if (got) files.push(got); }
+      }
+    }
+    handleFiles(files);
   });
-  $("file").addEventListener("change", function(e){ handleFiles(e.target.files); });
+  fileInput.addEventListener("change", function(e){
+    try { handleFiles(e.target.files); }
+    finally { e.target.value = ""; } // тот же скриншот можно добавить повторно
+  });
   $("pclear").addEventListener("click", function(){
     state.image = null; $("preview").style.display = "none"; $("pimg").src = ""; $("go").disabled = true;
+    fileInput.value = "";
+    clearImageError();
   });
 
   document.addEventListener("paste", function(e){
-    var items = e.clipboardData && e.clipboardData.items;
-    if (!items) return;
-    for (var i=0;i<items.length;i++){
-      if (items[i].type.indexOf("image") === 0){
-        handleFiles([items[i].getAsFile()]);
-        Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(x, idx){
-          if (idx === 0){ x.click(); }
-        });
-        break;
+    if (!e.clipboardData) return;
+    var pasted = null;
+    if (e.clipboardData.files && e.clipboardData.files.length){
+      pasted = e.clipboardData.files;
+    } else if (e.clipboardData.items){
+      for (var i=0;i<e.clipboardData.items.length;i++){
+        var item = e.clipboardData.items[i];
+        if (item.type && item.type.indexOf("image") === 0){
+          pasted = [item.getAsFile && item.getAsFile()]; // getAsFile() бывает null
+          break;
+        }
       }
     }
+    if (!pasted || !pasted[0]) return;
+    handleFiles(pasted);
+    Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(x, idx){
+      if (idx === 0){ x.click(); }
+    });
   });
 
   // ---------- render ----------
