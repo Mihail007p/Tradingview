@@ -1,0 +1,21 @@
+{
+  "name": "chart-analyst-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI chart-screenshot analyst on Cloudflare Workers AI (vision) + trade journal",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "preview": "node tools/dev-server.mjs",
+    "kv:create": "wrangler kv namespace create JOURNAL"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
