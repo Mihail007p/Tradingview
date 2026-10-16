@@ -25,6 +25,36 @@ jobs:
       - name: Install dependencies
         run: npm ci || npm install --no-audit --no-fund
 
+      - name: Diagnose KV access
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set +e
+          {
+          echo "--- whoami ---"
+          npx wrangler whoami 2>&1 | tail -20
+          echo "--- kv namespace list ---"
+          npx wrangler kv namespace list --json 2>&1 | tail -20
+          echo "--- kv namespace create ---"
+          npx wrangler kv namespace create "chart-analyst-bot-JOURNAL" --json 2>&1 | tail -20
+          echo "--- raw API: list namespaces ---"
+          curl -sS -X GET \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" | head -c 1200
+          echo
+          echo "--- raw API: create namespace ---"
+          curl -sS -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"title":"chart-analyst-bot-JOURNAL"}' | head -c 800
+          echo
+          } 2>&1 | tee diag.log
+        id: diag
+
       - name: Resolve KV namespace
         id: kv
         continue-on-error: true
@@ -52,7 +82,7 @@ jobs:
           CF_ACCOUNT_VALUE: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           python3 - <<'PY'
-          import json, os
+          import json, os, subprocess
 
           def rd(p):
               try:
@@ -62,8 +92,10 @@ jobs:
 
           kv = rd("kv.log")
           dep = rd("deploy.log")
+          diag = rd("diag.log")
 
-          text = "### KV step\n\n```\n" + kv[-15000:] + "\n```\n\n"
+          text = "### KV diagnostics\n\n```\n" + diag[-20000:] + "\n```\n\n"
+          text += "### KV step (ensure-kv.sh)\n\n```\n" + kv[-15000:] + "\n```\n\n"
           text += "### wrangler deploy\n\n```\n" + dep[-40000:] + "\n```\n"
 
           # never leak credentials through the log
