@@ -18,7 +18,8 @@ binding = "AI"
 # Если задан — UI требует его в заголовке X-Api-Key / ?key=..., чтобы
 # никто другой не тратил твою квоту Workers AI.
 [vars]
-# По умолчанию: Gemma 4 (vision + thinking), temperature = 0.
+# По умолчанию: Gemma 4 (vision), temperature = 0. Режим «Быстрый» работает без
+# thinking (быстрый ответ), «Глубокий» — с thinking и урезанным бюджетом токенов.
 # VISION_MODEL = "@cf/google/gemma-4-26b-a4b-it"
 
 # --- Журнал сделок на Cloudflare KV --------------------------

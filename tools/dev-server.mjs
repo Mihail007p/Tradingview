@@ -134,7 +134,7 @@ const restAI = {
 async function liveAnalysis(image, ctx) {
   const { data } = await analyzeChart({ VISION_MODEL: MODEL, AI: restAI }, {
     dataUri: image, bytes: [], question: ctx.question, market: ctx.market,
-    expiry: ctx.expiry, payout: ctx.payout,
+    expiry: ctx.expiry, payout: ctx.payout, mode: ctx.mode,
   });
   return data;
 }
@@ -193,6 +193,7 @@ const server = http.createServer(async (req, res) => {
         market: String(body.market || "").slice(0, 60),
         expiry: normalizeExpiry(body.expiry) || null,
         payout: Number(body.payout) || DEFAULT_PAYOUT,
+        mode: body.mode === "deep" ? "deep" : "fast",
       };
 
       const started = Date.now();
@@ -207,11 +208,17 @@ const server = http.createServer(async (req, res) => {
         ? sizeStake({ balance: Number(body.balance) || 0, stakePct: Number(body.stakePct) || 0, payout: ctx.payout })
         : null;
 
-      if (!LIVE) await new Promise((r) => setTimeout(r, 900 + Math.random() * 700));
+      // В демо имитируем задержку модели: быстрый режим заметно быстрее глубокого.
+      if (!LIVE) {
+        const lo = ctx.mode === "deep" ? 900 : 350;
+        const span = ctx.mode === "deep" ? 800 : 400;
+        await new Promise((r) => setTimeout(r, lo + Math.random() * span));
+      }
 
       return send(res, 200, {
         ok: true,
         model: LIVE ? MODEL : "demo-stub (локальный превью-режим)",
+        mode: ctx.mode,
         analysis,
         sizing: sizing && sizing.ok ? sizing : null,
         warnings: sizing && sizing.ok ? sizing.warnings : [],

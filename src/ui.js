@@ -265,6 +265,13 @@ export function ui() {
 
           <label class="f"><span>Выплата брокера (%)</span><input id="payout" type="number" value="85" min="1" max="200" step="1"></label>
 
+          <label class="f"><span>Скорость анализа</span>
+            <select id="mode">
+              <option value="fast">Быстрый — сразу отвечает (по умолчанию)</option>
+              <option value="deep">Глубокий — с рассуждениями, медленнее</option>
+            </select>
+          </label>
+
           <label class="f"><span>Вопрос к графику (необязательно)</span>
             <textarea id="question" placeholder="Например: стоит ли входить от уровня 0.618? Или: жду ретест пробитого уровня — подтверди."></textarea>
           </label>
@@ -397,7 +404,9 @@ export function ui() {
     reader.onload = function(e){
       var img = new Image();
       img.onload = function(){
-        var MAX = 1536;
+        // 1280px достаточно для читаемости графика, но заметно быстрее для
+        // vision-модели, чем большие скриншоты (меньше пикселей → быстрее предобработка).
+        var MAX = 1280;
         var w = img.width, h = img.height;
         var scale = Math.min(1, MAX / Math.max(w, h));
         var cw = Math.round(w*scale), ch = Math.round(h*scale);
@@ -406,7 +415,7 @@ export function ui() {
         var ctx = c.getContext("2d");
         ctx.fillStyle = "#000"; ctx.fillRect(0,0,cw,ch);
         ctx.drawImage(img, 0, 0, cw, ch);
-        cb(c.toDataURL("image/jpeg", 0.86));
+        cb(c.toDataURL("image/jpeg", 0.82));
       };
       img.onerror = function(){
         var r2 = new FileReader();
@@ -548,7 +557,8 @@ export function ui() {
       + '<button class="btn ghost sm" id="again">↻ Повторить анализ</button>'
       + "</div>";
 
-    html += '<div class="model" style="margin-top:12px">модель: ' + esc(d.model) + "</div>";
+    var took = d.ms ? " · " + (Math.round(d.ms / 100) / 10) + " с" : "";
+    html += '<div class="model" style="margin-top:12px">модель: ' + esc(d.model) + took + " · режим: " + (d.mode === "deep" ? "глубокий" : "быстрый") + "</div>";
     if (d.demo) html += '<div class="warn">ДЕМО-режим: анализ сгенерирован заглушкой, без обращения к Workers AI.</div>';
 
     $("result").innerHTML = html;
@@ -560,11 +570,34 @@ export function ui() {
   }
 
   // ---------- analyze ----------
+  // Режим скорости: "fast" — модель отвечает сразу (по умолчанию),
+  // "deep" — с внутренними рассуждениями, медленнее. Выбор запоминается.
+  (function(){
+    var m = $("mode");
+    if (!m) return;
+    var saved = localStorage.getItem("ca_mode");
+    if (saved === "deep" || saved === "fast") m.value = saved;
+    m.addEventListener("change", function(){ localStorage.setItem("ca_mode", m.value); });
+  })();
+
   function analyze(){
     if (!state.image) return;
+    var modeEl = $("mode");
+    var mode = modeEl && modeEl.value === "deep" ? "deep" : "fast";
     $("go").disabled = true;
+    var t0 = Date.now();
+    var hint = mode === "deep"
+      ? "глубокий режим · обычно 10–30 секунд"
+      : "быстрый режим · обычно 3–10 секунд";
     $("result").innerHTML = '<div class="empty"><div class="spin"></div>'
-      + '<div style="margin-top:14px">Модель читает график…<br><span style="font-size:12px">обычно 5–20 секунд</span></div></div>';
+      + '<div style="margin-top:14px" id="waitmsg">Модель читает график…<br><span style="font-size:12px">'
+      + hint + "</span></div></div>";
+    var waitTimer = setInterval(function(){
+      var el = document.getElementById("waitmsg");
+      if (!el){ clearInterval(waitTimer); return; }
+      var sec = Math.round((Date.now() - t0) / 1000);
+      el.innerHTML = "Модель читает график… " + sec + " с<br><span style=\"font-size:12px\">" + hint + "</span>";
+    }, 500);
 
     var payload = {
       image: state.image,
@@ -573,7 +606,8 @@ export function ui() {
       expiry: $("expiry").value,
       payout: Number($("payout").value) || 85,
       balance: Number($("balance").value) || 0,
-      stakePct: Number($("stake").value) || 0
+      stakePct: Number($("stake").value) || 0,
+      mode: mode
     };
 
     fetch(API + "/api/analyze", { method:"POST", headers: hdr(), body: JSON.stringify(payload) })
@@ -601,7 +635,7 @@ export function ui() {
       .catch(function(e){
         $("result").innerHTML = '<div class="err"><b>Ошибка сети</b><div style="margin-top:6px">' + esc(String(e)) + "</div></div>";
       })
-      .then(function(){ $("go").disabled = false; });
+      .then(function(){ clearInterval(waitTimer); $("go").disabled = false; });
   }
 
   $("go").addEventListener("click", analyze);

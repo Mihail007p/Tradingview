@@ -76,8 +76,11 @@ async function handleAnalyze(request, env) {
     payout: Number(body.payout) || DEFAULT_PAYOUT,
     balance: body.balance,
     stakePct: body.stakePct,
+    // "fast" (по умолчанию) — без thinking, отвечает сразу; "deep" — с thinking.
+    mode: body.mode === "deep" ? "deep" : "fast",
   };
 
+  const started = Date.now();
   try {
     const { data, model } = await analyzeChart(env, opts);
     const sizing =
@@ -92,6 +95,8 @@ async function handleAnalyze(request, env) {
     return json({
       ok: true,
       model,
+      mode: opts.mode,
+      ms: Date.now() - started,
       analysis: data,
       sizing: sizing && sizing.ok ? sizing : null,
       warnings: sizing && sizing.ok ? sizing.warnings : [],
