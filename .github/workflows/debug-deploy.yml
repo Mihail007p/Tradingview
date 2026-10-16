@@ -2,6 +2,8 @@ name: Debug deploy log
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 jobs:
   debug:
