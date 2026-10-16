@@ -9,7 +9,7 @@ export function ui() {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chart Analyst — ИИ-разбор графиков</title>
+<title>Pocket Options Analyst — ИИ-разбор графиков</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234c8dff'/%3E%3Cpath d='M6 22l6-7 5 4 9-11' stroke='%23fff' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
   :root{
@@ -123,8 +123,8 @@ export function ui() {
   .badge{
     font-weight:800;font-size:15px;letter-spacing:1.2px;padding:9px 18px;border-radius:10px;text-transform:uppercase
   }
-  .badge.long{background:rgba(38,208,124,.15);color:var(--green);border:1px solid rgba(38,208,124,.4)}
-  .badge.short{background:rgba(255,92,108,.15);color:var(--red);border:1px solid rgba(255,92,108,.4)}
+  .badge.call{background:rgba(38,208,124,.15);color:var(--green);border:1px solid rgba(38,208,124,.4)}
+  .badge.put{background:rgba(255,92,108,.15);color:var(--red);border:1px solid rgba(255,92,108,.4)}
   .badge.none{background:rgba(255,176,32,.13);color:var(--amber);border:1px solid rgba(255,176,32,.4)}
   .meta{display:flex;gap:8px;flex-wrap:wrap}
   .chip{font-size:11.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);padding:4px 10px;border-radius:999px;font-family:var(--mono)}
@@ -197,8 +197,8 @@ export function ui() {
   <header class="top">
     <div class="logo">📈</div>
     <div>
-      <h1>Chart Analyst</h1>
-      <div class="sub">ИИ-разбор торговых графиков · Cloudflare Workers AI</div>
+      <h1>Pocket Options Analyst</h1>
+      <div class="sub">ИИ-разбор графиков для бинарных опционов · Pocket Options</div>
     </div>
     <div class="spacer"></div>
     <input id="accessKey" type="password" class="keypill" placeholder="Ключ доступа" autocomplete="off" spellcheck="false">
@@ -230,28 +230,40 @@ export function ui() {
 
         <div class="card">
           <h3>Параметры</h3>
-          <label class="f"><span>Рынок</span>
-            <select id="market">
-              <option value="">Определить по графику</option>
-              <option value="crypto">Криптовалюта</option>
-              <option value="forex">Форекс / металлы</option>
-              <option value="stocks">Акции</option>
-              <option value="futures">Фьючерсы</option>
-              <option value="indices">Индексы</option>
-            </select>
-          </label>
-
-          <label class="f"><span>Режим</span>
-            <div class="seg" id="mode">
-              <button data-v="margin" class="on">Маржа / фьючерсы</button>
-              <button data-v="spot">Спот</button>
-            </div>
-          </label>
+          <div class="row">
+            <label class="f"><span>Актив</span>
+              <select id="market">
+                <option value="">Определить по графику</option>
+                <option value="forex">Валютные пары</option>
+                <option value="otc">OTC-пары (выходные)</option>
+                <option value="crypto">Криптовалюта</option>
+                <option value="stocks">Акции</option>
+                <option value="indices">Индексы / металлы</option>
+              </select>
+            </label>
+            <label class="f"><span>Экспирация</span>
+              <select id="expiry">
+                <option value="">Выбрать по графику</option>
+                <option value="15s">15 сек</option>
+                <option value="30s">30 сек</option>
+                <option value="1m">1 мин</option>
+                <option value="2m">2 мин</option>
+                <option value="3m">3 мин</option>
+                <option value="5m">5 мин</option>
+                <option value="10m">10 мин</option>
+                <option value="15m">15 мин</option>
+                <option value="30m">30 мин</option>
+                <option value="1h">1 час</option>
+              </select>
+            </label>
+          </div>
 
           <div class="row">
             <label class="f"><span>Депозит ($)</span><input id="balance" type="number" value="1000" min="0" step="any"></label>
-            <label class="f"><span>Риск на сделку (%)</span><input id="risk" type="number" value="1" min="0.05" max="100" step="0.05"></label>
+            <label class="f"><span>Ставка (% депозита)</span><input id="stake" type="number" value="2" min="0.1" max="100" step="0.1"></label>
           </div>
+
+          <label class="f"><span>Выплата брокера (%)</span><input id="payout" type="number" value="85" min="1" max="200" step="1"></label>
 
           <label class="f"><span>Вопрос к графику (необязательно)</span>
             <textarea id="question" placeholder="Например: стоит ли входить от уровня 0.618? Или: жду ретест пробитого уровня — подтверди."></textarea>
@@ -288,7 +300,7 @@ export function ui() {
   </section>
 
   <div class="foot">
-    Бот даёт технический анализ на основе визуального разбора графика. Это не финансововая рекомендация.<br>
+    Бот даёт технический анализ на основе визуального разбора графика. Это не финансовая рекомендация.<br>
     Управление риском и ответственность за сделки остаются на тебе.
   </div>
 </div>
@@ -302,7 +314,7 @@ export function ui() {
   var API = location.origin;
   var KEY = new URLSearchParams(location.search).get("key") || localStorage.getItem("ca_key") || "";
   if (KEY) localStorage.setItem("ca_key", KEY);
-  var state = { image:null, result:null, mode:"margin" };
+  var state = { image:null, result:null };
 
   // ---------- access key field ----------
   // ВАЖНО: $() объявлена выше — раньше вызов $("accessKey") шёл до её
@@ -447,16 +459,8 @@ export function ui() {
     }
   });
 
-  Array.prototype.forEach.call(document.querySelectorAll("#mode button"), function(b){
-    b.addEventListener("click", function(){
-      Array.prototype.forEach.call(document.querySelectorAll("#mode button"), function(x){ x.classList.remove("on"); });
-      b.classList.add("on");
-      state.mode = b.getAttribute("data-v");
-    });
-  });
-
   // ---------- render ----------
-  function directionWord(d){ return d === "long" ? "ЛОНГ" : d === "short" ? "ШОРТ" : "ВНЕ РЫНКА"; }
+  function directionWord(d){ return d === "call" ? "ВВЕРХ · CALL" : d === "put" ? "ВНИЗ · PUT" : "НЕТ СИГНАЛА"; }
   function trendWord(t){
     return t === "uptrend" ? "Восходящий" : t === "downtrend" ? "Нисходящий" : t === "sideways" ? "Боковик" : "—";
   }
@@ -482,7 +486,7 @@ export function ui() {
 
   function renderResult(d){
     var a = d.analysis, s = a.signal;
-    var cls = s.direction === "long" ? "g" : s.direction === "short" ? "r" : "a";
+    var cls = s.direction === "call" ? "g" : s.direction === "put" ? "r" : "a";
 
     var html = '<div class="verdict">'
       + '<span class="badge ' + s.direction + '">' + directionWord(s.direction) + "</span>"
@@ -491,7 +495,7 @@ export function ui() {
       + (a.timeframe ? '<span class="chip">' + esc(a.timeframe) + "</span>" : "")
       + '<span class="chip">' + trendWord(a.trend) + (a.trend_strength ? " · " + esc(a.trend_strength) : "") + "</span>"
       + (a.market ? '<span class="chip">' + esc(a.market) + "</span>" : "")
-      + (s.horizon ? '<span class="chip">⏱ ' + esc(s.horizon) + "</span>" : "")
+      + (s.expiry ? '<span class="chip">⏱ экспирация ' + esc(s.expiry) + "</span>" : "")
       + "</div></div>";
 
     html += '<div class="conf"><span style="font-size:11.5px;color:var(--muted)">УВЕРЕННОСТЬ</span>'
@@ -499,14 +503,10 @@ export function ui() {
       + "<b>" + s.confidence + "%</b></div>";
 
     if (s.direction !== "none"){
-      var tp = s.take_profits || [];
       html += '<div class="kv">'
-        + '<div><span>Вход</span><b>' + fmt(s.entry) + "</b></div>"
-        + '<div><span>Стоп</span><b class="r">' + fmt(s.stop_loss) + "</b></div>"
-        + '<div><span>Тейк 1</span><b class="g">' + fmt(tp[0]) + "</b></div>"
-        + '<div><span>Тейк 2</span><b class="g">' + (tp[1] ? fmt(tp[1]) : "—") + "</b></div>"
-        + '<div><span>R:R</span><b class="' + (s.risk_reward >= 2 ? "g" : s.risk_reward >= 1.5 ? "a" : "r") + '">'
-        + fmt(s.risk_reward) + "</b></div>"
+        + '<div><span>Вход (цена)</span><b>' + fmt(s.entry) + "</b></div>"
+        + '<div><span>Экспирация</span><b class="b">' + esc(s.expiry || "—") + "</b></div>"
+        + '<div><span>Направление</span><b class="' + (s.direction === "call" ? "g" : "r") + '">' + (s.direction === "call" ? "CALL ↑" : "PUT ↓") + "</b></div>"
         + "</div>";
     }
 
@@ -528,12 +528,11 @@ export function ui() {
 
     if (d.sizing){
       var z = d.sizing;
-      html += '<div class="sec"><h4>Размер позиции</h4><div class="kv">'
-        + '<div><span>Риск</span><b class="a">$' + fmt(z.riskAmount) + "</b></div>"
-        + '<div><span>Объём</span><b>' + fmt(z.qty) + "</b></div>"
-        + '<div><span>Номинал</span><b>$' + fmt(z.notional) + "</b></div>"
-        + '<div><span>Плечо</span><b class="' + (z.leverage > 10 ? "r" : "b") + '">' + fmt(z.leverage) + "x</b></div>"
-        + '<div><span>Стоп</span><b>' + fmt(z.stopPct) + "%</b></div>"
+      html += '<div class="sec"><h4>Ставка</h4><div class="kv">'
+        + '<div><span>Сумма ставки</span><b class="a">$' + fmt(z.stake) + "</b></div>"
+        + '<div><span>Выигрыш</span><b class="g">+$' + fmt(z.potentialProfit) + "</b></div>"
+        + '<div><span>Проигрыш</span><b class="r">−$' + fmt(z.potentialLoss) + "</b></div>"
+        + '<div><span>Break-even</span><b>' + fmt(z.breakEvenWinRate) + "%</b></div>"
         + "</div></div>";
     }
 
@@ -571,9 +570,10 @@ export function ui() {
       image: state.image,
       question: $("question").value,
       market: $("market").value,
-      mode: state.mode,
+      expiry: $("expiry").value,
+      payout: Number($("payout").value) || 85,
       balance: Number($("balance").value) || 0,
-      riskPct: Number($("risk").value) || 0
+      stakePct: Number($("stake").value) || 0
     };
 
     fetch(API + "/api/analyze", { method:"POST", headers: hdr(), body: JSON.stringify(payload) })
@@ -677,17 +677,18 @@ export function ui() {
     for (var i=0;i<all.length;i++){
       if (all[i].id !== id) continue;
       var t = all[i];
-      var entry = Number(t.entry), stop = Number(t.stop_loss);
-      if (!isFinite(entry) || !isFinite(stop) || !isFinite(exit) || entry === stop) return false;
-      var dir = t.direction === "short" ? -1 : 1;
-      var risk = Math.abs(entry - stop);
-      var resultR = Math.round(((exit - entry) * dir / risk) * 100) / 100;
-      var qty = Number(t.qty) || 0;
-      var resultPnl = Math.round((exit - entry) * dir * qty * 100) / 100;
+      var entry = Number(t.entry);
+      if (!isFinite(entry) || !isFinite(exit) || entry <= 0 || exit <= 0) return false;
+      var dir = (t.direction === "put" || t.direction === "short") ? "put" : "call";
+      var stake = Number(t.stake) || 0;
+      var payout = Number(t.payout) || 85;
+      var status = exit === entry ? "breakeven" : ((dir === "call" && exit > entry) || (dir === "put" && exit < entry)) ? "win" : "loss";
+      var resultR = status === "win" ? payout / 100 : status === "loss" ? -1 : 0;
+      var resultPnl = status === "win" ? stake * payout / 100 : status === "loss" ? -stake : 0;
       t.exitPrice = exit;
-      t.status = resultR > 0.05 ? "win" : resultR < -0.05 ? "loss" : "breakeven";
-      t.resultR = resultR;
-      t.resultPnl = resultPnl;
+      t.status = status;
+      t.resultR = Math.round(resultR * 100) / 100;
+      t.resultPnl = Math.round(resultPnl * 100) / 100;
       t.closedAt = Date.now();
       lsPersist(all);
       return true;
@@ -728,15 +729,12 @@ export function ui() {
       timeframe: a.timeframe || "—",
       direction: a.signal.direction,
       entry: a.signal.entry,
-      stop_loss: a.signal.stop_loss,
-      take_profits: a.signal.take_profits || [],
-      risk_reward: a.signal.risk_reward,
+      expiry: a.signal.expiry,
       confidence: a.signal.confidence,
-      qty: sizing ? sizing.qty : null,
-      notional: sizing ? sizing.notional : null,
-      leverage: sizing ? sizing.leverage : null,
+      stake: sizing ? sizing.stake : null,
+      payout: Number($("payout").value) || 85,
       balance: Number($("balance").value) || null,
-      riskPct: Number($("risk").value) || null,
+      stakePct: Number($("stake").value) || null,
       summary: a.summary || ""
     };
     if (journalLocal){ lsAdd(trade); afterSave(); return; }
@@ -828,7 +826,7 @@ export function ui() {
       var date = new Date(t.createdAt).toLocaleString("ru-RU", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
       var stCls = t.status === "win" ? "g" : t.status === "loss" ? "r" : t.status === "open" ? "b" : "a";
       var stTxt = t.status === "win" ? "Вин" : t.status === "loss" ? "Лосс" : t.status === "open" ? "Открыта" : "Б/У";
-      var dirCls = t.direction === "long" ? "g" : "r";
+      var dirCls = t.direction === "call" ? "g" : "r";
 
       var action = "";
       if (t.status === "open"){
@@ -842,10 +840,10 @@ export function ui() {
       rows += "<tr>"
         + '<td style="color:var(--muted);font-size:12px">' + esc(date) + "</td>"
         + "<td><b>" + esc(t.instrument) + '</b><br><span style="color:var(--dim);font-size:11.5px">' + esc(t.timeframe) + "</span></td>"
-        + '<td class="num ' + dirCls + '">' + (t.direction === "long" ? "ЛОНГ" : "ШОРТ") + "</td>"
+        + '<td class="num ' + dirCls + '">' + (t.direction === "call" ? "ВВЕРХ" : "ВНИЗ") + "</td>"
         + '<td class="num">' + fmt(t.entry) + "</td>"
-        + '<td class="num r">' + fmt(t.stop_loss) + "</td>"
-        + '<td class="num g">' + fmt((t.take_profits && t.take_profits[0])) + "</td>"
+        + '<td class="num">' + esc(t.expiry || "—") + "</td>"
+        + '<td class="num">$' + fmt(t.stake) + "</td>"
         + '<td class="num">' + fmt(t.risk_reward) + "</td>"
         + '<td class="num">' + (t.confidence ? t.confidence + "%" : "—") + "</td>"
         + '<td class="num ' + stCls + '"><b>' + stTxt + "</b>"
@@ -857,8 +855,8 @@ export function ui() {
     }
 
     $("jlist").innerHTML = '<div style="overflow-x:auto"><table><thead><tr>'
-      + "<th>Дата</th><th>Инструмент</th><th>Напр.</th><th>Вход</th><th>Стоп</th><th>Тейк</th>"
-      + "<th>R:R</th><th>Увер.</th><th>Статус</th><th>Закрытие</th><th></th>"
+      + "<th>Дата</th><th>Актив</th><th>Напр.</th><th>Вход</th><th>Экспир.</th><th>Ставка</th>"
+      + "<th>Увер.</th><th>Статус</th><th>Цена на экспирации</th><th></th>"
       + "</tr></thead><tbody>" + rows + "</tbody></table></div>";
 
     Array.prototype.forEach.call(document.querySelectorAll("[data-close]"), function(b){

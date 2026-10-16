@@ -36,28 +36,25 @@ function fakeKV() {
 }
 
 const ANALYSIS = {
-  instrument: "BTCUSDT",
-  timeframe: "4H",
-  market: "crypto",
+  instrument: "EUR/USD",
+  timeframe: "M1",
+  market: "forex",
   chart_type: "candles",
   trend: "uptrend",
   trend_strength: "moderate",
   summary: "Тестовый разбор.",
-  levels: { support: [60000, 59000], resistance: [65000, 66000] },
-  patterns: ["треугольник"],
-  signals: [],
-  indicators: ["EMA50"],
+  levels: { support: [1.0840, 1.0832], resistance: [1.0870, 1.0880] },
+  patterns: ["бычье поглощение"],
+  indicators: ["EMA20"],
   signal: {
-    direction: "long",
-    entry: 62000,
-    stop_loss: 60000,
-    take_profits: [65000, 67000, 69000],
-    risk_reward: 1.5,
+    direction: "call",
+    entry: 1.0858,
+    expiry: "3m",
     confidence: 62,
-    horizon: "1-2 недели",
+    reason: "Отскок от поддержки.",
   },
   risks: ["новости"],
-  invalidations: ["пробой 60000"],
+  invalidations: ["закрытие ниже 1.0840"],
   recommendation: "Вход по плану.",
 };
 
@@ -83,7 +80,7 @@ const json = async (res) => {
   const res = await call("/");
   const body = await res.text();
   check("GET / без ключа отдаёт HTML (а не JSON с ошибкой)", res.status === 200 && (res.headers.get("content-type") || "").includes("text/html"));
-  check("страница содержит интерфейс", body.includes("Chart Analyst") && body.includes("accessKey"));
+  check("страница содержит интерфейс", body.includes("Pocket Options Analyst") && body.includes("accessKey"));
   check("в скрипте нет вызова $() до объявления", body.indexOf("function $(id)") < body.indexOf('var API = location.origin;'));
 }
 {
@@ -117,7 +114,7 @@ const json = async (res) => {
   const post = await call("/api/journal", {
     method: "POST",
     headers: { "X-Api-Key": KEY, "Content-Type": "application/json" },
-    body: JSON.stringify({ instrument: "BTCUSDT", direction: "long", entry: 100, stop_loss: 95 }),
+    body: JSON.stringify({ instrument: "EUR/USD", direction: "call", entry: 1.0858, expiry: "3m", stake: 20, payout: 85 }),
   }, env);
   const pj = await json(post);
   check("POST /api/journal сохраняет сделку", post.status === 200 && pj.ok && pj.trade.id && pj.entries.length === 1, JSON.stringify(pj));
@@ -141,10 +138,12 @@ const json = async (res) => {
   const res = await call("/api/analyze", {
     method: "POST",
     headers: { "X-Api-Key": KEY, "Content-Type": "application/json" },
-    body: JSON.stringify({ image: "data:image/png;base64,AAAA", balance: 1000, riskPct: 1, mode: "margin" }),
+    body: JSON.stringify({ image: "data:image/png;base64,AAAA", balance: 1000, stakePct: 2, payout: 85, expiry: "3m" }),
   });
   const d = await json(res);
-  check("POST /api/analyze с ключом → 200 + анализ + размер позиции", res.status === 200 && d.ok && d.analysis && d.sizing && d.sizing.qty > 0, JSON.stringify(d).slice(0, 200));
+  check("POST /api/analyze с ключом → 200 + анализ + ставка", res.status === 200 && d.ok && d.analysis && d.sizing && d.sizing.stake === 20, JSON.stringify(d).slice(0, 200));
+  check("анализ бинарки: направление call и экспирация 3m", d.analysis && d.analysis.signal.direction === "call" && d.analysis.signal.expiry === "3m", JSON.stringify(d.analysis && d.analysis.signal));
+  check("ставка: выигрыш 17$ и break-even 54.05%", d.sizing && d.sizing.potentialProfit === 17 && d.sizing.breakEvenWinRate === 54.05, JSON.stringify(d.sizing));
 }
 {
   const env = { ACCESS_KEY: KEY, AI: fakeAI("fail") };

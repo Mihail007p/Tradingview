@@ -1,73 +1,56 @@
 /**
- * Position sizing + risk checks. Pure math, no AI.
- * Works the same in the Worker and in the local dev server.
+ * Расчёт ставки и результатов для Pocket Options (бинарные опционы). Чистая математика, без AI.
+ * Одинаково работает в Worker и в локальном dev-сервере.
+ *
+ *  - CALL выигрывает, если цена на экспирации выше цены входа; PUT — если ниже.
+ *  - Выигрыш = ставка × выплата%, проигрыш = −ставка.
+ *  - Ничья (цена не изменилась) — ставка возвращается, результат 0 (проверь правило брокера).
  */
 
-export function sizePosition({ balance, riskPct, mode, entry, stop, targets = [] }) {
+export const DEFAULT_PAYOUT = 85; // типичная выплата по популярным парам, % (вводится вручную)
+export const MIN_STAKE = 1; // минимальная ставка Pocket Options, $
+export const MAX_STAKE_PCT = 5; // предупреждение, если ставка больше этого % депозита
+
+/** Break-even винрейт при выплате p%: 100 / (100 + p). */
+export function breakEvenWinRate(payoutPct) {
+  return (100 / (100 + payoutPct)) * 100;
+}
+
+export function sizeStake({ balance, stakePct, payout = DEFAULT_PAYOUT }) {
   const b = Number(balance);
-  const rp = Number(riskPct);
-  const e = Number(entry);
-  const s = Number(stop);
+  const sp = Number(stakePct);
+  const p = Number(payout);
 
-  if (![b, rp, e, s].every(Number.isFinite) || b <= 0 || rp <= 0 || e <= 0 || s <= 0) {
-    return { ok: false, reason: "Нужны корректные: депозит, риск %, вход и стоп." };
-  }
-  if (e === s) return { ok: false, reason: "Вход и стоп совпадают — расчёт невозможен." };
-
-  const riskAmount = (b * rp) / 100;
-  const stopDistance = Math.abs(e - s);
-  const stopPct = (stopDistance / e) * 100;
-  let qty = riskAmount / stopDistance;
-  let notional = qty * e;
-  let leverage = notional / b;
-
-  const warnings = [];
-  let capped = false;
-
-  if (mode === "spot") {
-    // No leverage on spot: notional cannot exceed the balance.
-    if (notional > b) {
-      notional = b;
-      qty = notional / e;
-      leverage = 1;
-      capped = true;
-      warnings.push(
-        `Спот без плеча: размер урезан до депозита. Фактический риск ${(
-          ((stopDistance / e) * 100 * qty * e) / b
-        ).toFixed(2)}% вместо ${rp}%.`
-      );
-    } else {
-      leverage = 1;
-    }
+  if (![b, sp, p].every(Number.isFinite) || b <= 0 || sp <= 0 || p <= 0) {
+    return { ok: false, reason: "Нужны корректные: депозит, сумма ставки (%) и выплата (%)." };
   }
 
-  if (leverage > 10) {
-    warnings.push(`Требуется плечо ${leverage.toFixed(1)}x — выше 10x. Снизь риск или найди более близкий стоп.`);
-  }
-  if (stopPct > 8) {
-    warnings.push(`Стоп далековат: ${stopPct.toFixed(2)}% от цены входа.`);
-  }
-
-  const rr = targets.length ? Math.abs(targets[0] - e) / stopDistance : null;
-  if (rr !== null && rr < 1.5) {
-    warnings.push(`R:R = ${rr.toFixed(2)} — ниже 1.5. Такая сделка редко оправдана математически.`);
-  }
-
-  const round = (n, d = 6) => {
+  const round = (n, d = 2) => {
     const f = 10 ** d;
     return Math.round(n * f) / f;
   };
 
+  const stake = round((b * sp) / 100, 2);
+  const warnings = [];
+
+  if (stake < MIN_STAKE) {
+    warnings.push(`Ставка $${stake} ниже минимальной $${MIN_STAKE} на Pocket Options.`);
+  }
+  if (sp > MAX_STAKE_PCT) {
+    warnings.push(`Ставка ${sp}% депозита — выше ${MAX_STAKE_PCT}%. На бинарках серия из 3–4 убытков уже сильно бьёт по счёту.`);
+  }
+  if (p < 70) {
+    warnings.push(`Выплата ${p}% низкая: чтобы выйти в ноль, нужен винрейт ${breakEvenWinRate(p).toFixed(1)}%.`);
+  }
+
   return {
     ok: true,
-    riskAmount: round(riskAmount, 2),
-    stopDistance: round(stopDistance, 8),
-    stopPct: round(stopPct, 3),
-    qty: round(qty, 6),
-    notional: round(notional, 2),
-    leverage: round(leverage, 2),
-    requiredMargin: round(notional / Math.max(leverage, 1), 2),
-    capped,
+    stake,
+    payout: round(p, 2),
+    potentialProfit: round((stake * p) / 100, 2),
+    potentialLoss: round(stake, 2),
+    breakEvenWinRate: round(breakEvenWinRate(p), 2),
+    stakePct: round(sp, 3),
     warnings,
   };
 }
@@ -86,7 +69,7 @@ export function journalStats(entries = []) {
   const avgWin = wins.length ? wins.reduce((a, e) => a + Number(e.resultR || 0), 0) / wins.length : 0;
   const avgLoss = losses.length ? losses.reduce((a, e) => a + Number(e.resultR || 0), 0) / losses.length : 0;
   const winRate = closed.length ? (wins.length / closed.length) * 100 : 0;
-  // Expectancy in R per trade
+  // Ожидание в долях ставки на сделку
   const expectancy = closed.length ? totalR / closed.length : 0;
 
   return {
@@ -108,24 +91,41 @@ export function journalStats(entries = []) {
   };
 }
 
+/** Старые записи: long/short → call/put. */
+export function normalizeDirection(d) {
+  if (d === "put" || d === "short") return "put";
+  return "call";
+}
+
+/**
+ * Результат бинарной сделки по цене экспирации.
+ * resultR   — прибыль в долях ставки (выигрыш = выплата/100, проигрыш = −1).
+ * resultPnl — прибыль в $ (выигрыш = ставка × выплата/100, проигрыш = −ставка).
+ */
 export function computeClose({ trade, exitPrice }) {
   const entry = Number(trade.entry);
-  const stop = Number(trade.stop_loss);
   const exit = Number(exitPrice);
-  if (![entry, stop, exit].every(Number.isFinite) || entry === stop) {
-    return { ok: false, reason: "Не хватает данных для расчёта результата." };
+  if (![entry, exit].every(Number.isFinite) || entry <= 0 || exit <= 0) {
+    return { ok: false, reason: "Не хватает данных для расчёта результата (нужны цена входа и цена выхода)." };
   }
 
-  const dir = trade.direction === "short" ? -1 : 1;
-  const risk = Math.abs(entry - stop);
-  const resultR = Math.round(((exit - entry) * dir / risk) * 100) / 100;
+  const dir = normalizeDirection(trade.direction);
+  const stake = Number(trade.stake) || 0;
+  const payout = Number(trade.payout) || DEFAULT_PAYOUT;
 
-  const qty = Number(trade.qty) || 0;
-  const resultPnl = Math.round((exit - entry) * dir * qty * 100) / 100;
+  let status;
+  if (exit === entry) status = "breakeven";
+  else if ((dir === "call" && exit > entry) || (dir === "put" && exit < entry)) status = "win";
+  else status = "loss";
 
-  let status = "breakeven";
-  if (resultR > 0.05) status = "win";
-  else if (resultR < -0.05) status = "loss";
+  const resultR = status === "win" ? payout / 100 : status === "loss" ? -1 : 0;
+  const resultPnl =
+    status === "win" ? (stake * payout) / 100 : status === "loss" ? -stake : 0;
 
-  return { ok: true, status, resultR, resultPnl };
+  return {
+    ok: true,
+    status,
+    resultR: Math.round(resultR * 100) / 100,
+    resultPnl: Math.round(resultPnl * 100) / 100,
+  };
 }
