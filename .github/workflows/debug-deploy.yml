@@ -1,0 +1,86 @@
+name: Debug deploy log
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    name: Capture wrangler output
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci || npm install --no-audit --no-fund
+
+      - name: Resolve KV namespace
+        id: kv
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash scripts/ensure-kv.sh 2>&1 | tee kv.log
+
+      - name: Deploy
+        id: dep
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -o pipefail
+          npx wrangler deploy 2>&1 | tee deploy.log
+
+      - name: Publish log as check-run
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+          CF_TOKEN_VALUE: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_VALUE: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+
+          def rd(p):
+              try:
+                  return open(p, encoding="utf-8", errors="replace").read()
+              except Exception as e:
+                  return "(no %s: %s)" % (p, e)
+
+          kv = rd("kv.log")
+          dep = rd("deploy.log")
+
+          text = "### KV step\n\n```\n" + kv[-15000:] + "\n```\n\n"
+          text += "### wrangler deploy\n\n```\n" + dep[-40000:] + "\n```\n"
+
+          # never leak credentials through the log
+          for name in ("CF_TOKEN_VALUE", "CF_ACCOUNT_VALUE"):
+              v = (os.environ.get(name) or "").strip()
+              if len(v) > 6:
+                  text = text.replace(v, v[:3] + "***" + v[-3:])
+
+          payload = {
+              "name": "deploy-debug",
+              "head_sha": os.environ["SHA"],
+              "status": "completed",
+              "conclusion": "neutral",
+              "output": {
+                  "title": "wrangler deploy debug log",
+                  "summary": "Raw output of ensure-kv.sh and wrangler deploy.",
+                  "text": text[-65000:],
+              },
+          }
+          json.dump(payload, open("/tmp/cr.json", "w"))
+          PY
+          gh api -X POST "/repos/$GITHUB_REPOSITORY/check-runs" --input /tmp/cr.json --jq '.html_url'
