@@ -29,9 +29,13 @@ for (const response of [
     assert.equal(body.max_tokens, undefined);
     assert.equal(body.image, undefined);
     assert.equal(body.messages[1].content[1].image_url.url, opts.dataUri);
-    assert.match(body.messages[0].content, /ANALYSIS CHECKLIST/);
+    // Роль модели зафиксирована: трейдер со своим терминалом, а не пассивный аналитик.
+    assert.match(body.messages[0].content, /TRADER'S ROUTINE/);
+    assert.match(body.messages[0].content, /experienced Pocket Options trader/i);
+    assert.doesNotMatch(body.messages[0].content, /binary-options analyst/i);
     assert.match(body.messages[1].content[0].text, /EUR\/USD/);
     assert.match(body.messages[1].content[0].text, /быстрый/);
+    assert.match(body.messages[1].content[0].text, /трейдер/i);
     return response;
   } } }, opts);
   assert.equal(calls, 1);
@@ -49,6 +53,7 @@ for (const response of [
     assert.equal(body.chat_template_kwargs.enable_thinking, true);
     assert.equal(body.max_completion_tokens, 4096);
     assert.match(body.messages[1].content[0].text, /глубокий/);
+    assert.match(body.messages[1].content[0].text, /трейдерский чек-лист/);
     return { response: content };
   } } }, { ...opts, mode: "deep" });
   assert.equal(calls, 1);

@@ -18,7 +18,7 @@ export function ui() {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pocket Options Analyst — ИИ-разбор графиков</title>
+<title>Pocket Options Analyst — ИИ-трейдер: разбор графика</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234c8dff'/%3E%3Cpath d='M6 22l6-7 5 4 9-11' stroke='%23fff' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
   :root{
@@ -215,7 +215,7 @@ export function ui() {
     <div class="logo">📈</div>
     <div>
       <h1>Pocket Options Analyst</h1>
-      <div class="sub">ИИ-разбор графиков для бинарных опционов · Pocket Options</div>
+      <div class="sub">ИИ-трейдер: разбор графика и решение по сделке · бинарные опционы Pocket Options</div>
     </div>
     <div class="spacer"></div>
     <input id="accessKey" type="password" class="keypill" placeholder="Ключ доступа" autocomplete="off" spellcheck="false">
@@ -326,7 +326,7 @@ export function ui() {
   </section>
 
   <div class="foot">
-    Бот даёт технический анализ на основе визуального разбора графика. Это не финансовая рекомендация.<br>
+    ИИ-трейдер разбирает график и даёт своё решение по сделке. Это не финансовая рекомендация.<br>
     Управление риском и ответственность за сделки остаются на тебе.
   </div>
 </div>
