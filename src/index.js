@@ -110,7 +110,7 @@ async function handleAnalyze(request, env) {
       sizing: sizing && sizing.ok ? sizing : null,
       warnings: sizing && sizing.ok ? sizing.warnings : [],
       disclaimer:
-        "Это технический анализ, а не финансовая рекомендация. Решение и риск — твои.",
+        "Это решение ИИ-трейдера по разбору графика, а не финансовая рекомендация. Решение и риск — твои.",
     });
   } catch (e) {
     return json(
