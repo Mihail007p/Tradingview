@@ -12,6 +12,7 @@ const opts = {
 };
 
 // Verify the actual payload sent to Workers AI, not just configuration constants.
+// Default is the FAST mode: thinking off, tight completion budget — the bot answers quickly.
 for (const response of [
   { response: content },
   { choices: [{ message: { content, reasoning_content: "Internal analysis" } }] },
@@ -23,18 +24,35 @@ for (const response of [
     calls++;
     assert.equal(model, DEFAULT_MODEL);
     assert.equal(body.temperature, 0);
-    assert.equal(body.chat_template_kwargs.enable_thinking, true);
-    assert.equal(body.max_completion_tokens, 8192);
+    assert.equal(body.chat_template_kwargs.enable_thinking, false);
+    assert.equal(body.max_completion_tokens, 2048);
     assert.equal(body.max_tokens, undefined);
     assert.equal(body.image, undefined);
     assert.equal(body.messages[1].content[1].image_url.url, opts.dataUri);
     assert.match(body.messages[0].content, /ANALYSIS CHECKLIST/);
     assert.match(body.messages[1].content[0].text, /EUR\/USD/);
+    assert.match(body.messages[1].content[0].text, /быстрый/);
     return response;
   } } }, opts);
   assert.equal(calls, 1);
   assert.equal(result.model, DEFAULT_MODEL);
+  assert.equal(result.mode, "fast");
   assert.equal(result.data.signal.direction, "none");
+}
+
+// DEEP mode opts into thinking — but with a budget well below the old 8192.
+{
+  let calls = 0;
+  const result = await analyzeChart({ AI: { async run(model, body) {
+    calls++;
+    assert.equal(model, DEFAULT_MODEL);
+    assert.equal(body.chat_template_kwargs.enable_thinking, true);
+    assert.equal(body.max_completion_tokens, 4096);
+    assert.match(body.messages[1].content[0].text, /глубокий/);
+    return { response: content };
+  } } }, { ...opts, mode: "deep" });
+  assert.equal(calls, 1);
+  assert.equal(result.mode, "deep");
 }
 
 // A failed or incomplete thinking response must fall back without an image-less Gemma retry.
@@ -92,4 +110,13 @@ for (const mode of ["throw", "bad-json", "thinking-only"]) {
 }
 assert.equal(extractJson(`<think>${content}`), null);
 assert.deepEqual(extractJson(`\u0060\u0060\u0060json\n${content}\n\u0060\u0060\u0060`), verdict);
-console.log("✔ AI smoke: temperature 0, thinking, image payloads, response formats, fallback and errors");
+// Обрезанный по лимиту токенов JSON спасается, а не отправляет запрос на медленный fallback.
+{
+  const full = JSON.stringify(verdict);
+  const cut = full.slice(0, full.lastIndexOf('"', full.length - 12)); // внутри последнего значения
+  const salvaged = extractJson(cut);
+  assert.ok(salvaged && typeof salvaged === "object");
+  assert.equal(typeof salvaged.summary, "string");
+  assert.equal(extractJson("{not json"), null);
+}
+console.log("✔ AI smoke: temperature 0, быстрый/глубокий режимы, image payloads, response formats, fallback and errors");

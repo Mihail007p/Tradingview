@@ -7,6 +7,18 @@
 export const DEFAULT_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 export const FALLBACK_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
 
+/**
+ * Режимы анализа — скорость против глубины:
+ *  - "fast" (по умолчанию) — thinking выключен, модель отвечает сразу;
+ *  - "deep" — thinking включён, но с урезанным бюджетом токенов, чтобы
+ *    размышления не растягивались на тысячи токенов.
+ */
+export const FAST_MODE = "fast";
+export const DEEP_MODE = "deep";
+
+/** Бюджет ответа (thinking + JSON). Меньше бюджет — быстрее ответ. */
+const MAX_COMPLETION_TOKENS = { [FAST_MODE]: 2048, [DEEP_MODE]: 4096 };
+
 /** Экспирации, которые есть в Pocket Options (ключ → подпись). */
 export const EXPIRIES = ["15s", "30s", "1m", "2m", "3m", "5m", "10m", "15m", "30m", "1h"];
 
@@ -26,8 +38,10 @@ HARD RULES:
 6. Pick expiry from this list only: 15s, 30s, 1m, 2m, 3m, 5m, 10m, 15m, 30m, 1h. Prefer an expiry that is
    at least 2-3 candles of the visible timeframe, so the move has time to develop.
 7. Confidence must reflect genuine uncertainty: 0-100 integer. Be conservative: confidence above 75 is rare.
+8. Be concise everywhere: summary is 1-3 short sentences, reason/risks/invalidations are short phrases.
+   The trader is waiting — do not pad, repeat, or write essays.
 
-ANALYSIS CHECKLIST (perform before producing the final JSON):
+ANALYSIS CHECKLIST (cover these points in the verdict; do not deliberate at length):
 - Verify the instrument, timeframe, chart readability and visible price. Do not infer hidden data.
 - Compare trend structure, nearby support/resistance and visible candle confirmation.
 - Consider an opposing scenario and what would invalidate the proposed setup.
@@ -76,6 +90,16 @@ function userPrompt(ctx) {
     lines.push(`Выплата брокера при выигрыше: ${ctx.payout}% (учитывай при оценке, но не подгоняй под неё вывод).`);
   }
 
+  if (ctx.mode === DEEP_MODE) {
+    lines.push(
+      "",
+      "Режим: глубокий анализ. Мысленно пройди чек-лист коротко (2–6 тезисов, без пространных рассуждений),",
+      "затем сразу выдай JSON. Не растягивай размышления."
+    );
+  } else {
+    lines.push("", "Режим: быстрый анализ. Отвечай сразу и кратко, без длинных внутренних рассуждений — сразу JSON.");
+  }
+
   if (ctx.question && ctx.question.trim()) {
     lines.push("", `Дополнительный вопрос трейдера: ${ctx.question.trim()}`);
   }
@@ -94,7 +118,7 @@ function userPrompt(ctx) {
 }
 
 /** Workers AI accepts images in a couple of shapes depending on the model. Build both. */
-function buildPayloads(model, promptText, dataUri, bytes) {
+function buildPayloads(model, promptText, dataUri, bytes, mode) {
   const inlineMessages = [
     { role: "system", content: SYSTEM_PROMPT },
     {
@@ -111,11 +135,16 @@ function buildPayloads(model, promptText, dataUri, bytes) {
     { role: "user", content: promptText },
   ];
 
-  // Reasoning needs a larger completion budget than the old non-thinking model.
   // Only send model-specific options to Gemma, not to legacy vision endpoints.
-  const generation = model === DEFAULT_MODEL
-    ? { temperature: 0, max_completion_tokens: 8192, chat_template_kwargs: { enable_thinking: true } }
-    : { temperature: 0, max_tokens: 2000 };
+  // Thinking dominates latency: off in "fast", on with a tight budget in "deep".
+  const generation =
+    model === DEFAULT_MODEL
+      ? {
+          temperature: 0,
+          max_completion_tokens: MAX_COMPLETION_TOKENS[mode] ?? MAX_COMPLETION_TOKENS[FAST_MODE],
+          chat_template_kwargs: { enable_thinking: mode === DEEP_MODE },
+        }
+      : { temperature: 0, max_tokens: 2000 };
 
   return {
     inline: {
@@ -149,19 +178,72 @@ function extractText(result) {
   return "";
 }
 
+/** Close an unterminated string and any open { } / [ ] so a cut-off JSON can parse. */
+function autoClose(s) {
+  const stack = [];
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+    } else if (ch === '"') {
+      inStr = true;
+    } else if (ch === "{" || ch === "[") {
+      stack.push(ch === "{" ? "}" : "]");
+    } else if (ch === "}" || ch === "]") {
+      stack.pop();
+    }
+  }
+  let out = s;
+  if (inStr) out += '"';
+  else out = out.replace(/[\s,:]+$/, "");
+  for (let i = stack.length - 1; i >= 0; i--) out += stack[i];
+  return out;
+}
+
+/**
+ * Salvage a verdict truncated by the token limit instead of re-running a slower
+ * fallback model: walk the tail back to a structural boundary and auto-close.
+ */
+function parseTruncated(candidate) {
+  let cut = candidate.length;
+  for (let i = 0; i < 32 && cut > 0; i++) {
+    const attempt = autoClose(candidate.slice(0, cut));
+    try {
+      const obj = JSON.parse(attempt);
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) return obj;
+    } catch (_) {
+      /* keep trimming the tail */
+    }
+    const next = Math.max(
+      candidate.lastIndexOf(",", cut - 1),
+      candidate.lastIndexOf("}", cut - 1),
+      candidate.lastIndexOf("]", cut - 1)
+    );
+    if (next === -1 || next >= cut) break;
+    cut = next;
+    while (cut > 0 && /[\s,:]/.test(candidate[cut - 1])) cut--;
+  }
+  return null;
+}
+
 /** Pull the first JSON object out of a model reply, tolerating ```json fences and chatter. */
 export function extractJson(raw) {
   if (!raw) return null;
   // Never parse a JSON example from a separate reasoning block as the verdict.
   let text = String(raw).replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  if (/<think>/i.test(text)) return null; // truncated thinking: no final verdict yet
+  if (/think/i.test(text)) return null; // truncated thinking: no final verdict yet
   text = text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
 
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
+  if (start === -1) return null;
 
-  const candidate = text.slice(start, end + 1);
+  // end <= start means the closing brace is missing: keep the tail as a truncation candidate.
+  const candidate = end > start ? text.slice(start, end + 1) : text.slice(start);
   try {
     return JSON.parse(candidate);
   } catch (_) {
@@ -169,7 +251,8 @@ export function extractJson(raw) {
     try {
       return JSON.parse(candidate.replace(/,\s*([}\]])/g, "$1"));
     } catch (_e) {
-      return null;
+      // token-limit truncation: salvage the finished part of the verdict
+      return parseTruncated(candidate);
     }
   }
 }
@@ -251,8 +334,9 @@ export function normalize(rawObj) {
 
 export async function analyzeChart(env, opts) {
   const { dataUri, bytes, question, market, expiry, payout } = opts;
+  const mode = opts.mode === DEEP_MODE ? DEEP_MODE : FAST_MODE;
 
-  const promptText = userPrompt({ question, market, expiry, payout });
+  const promptText = userPrompt({ question, market, expiry, payout, mode });
   const primary = env.VISION_MODEL || DEFAULT_MODEL;
   const models = [primary];
   if (primary !== FALLBACK_MODEL) models.push(FALLBACK_MODEL);
@@ -260,7 +344,7 @@ export async function analyzeChart(env, opts) {
   const errors = [];
 
   for (const model of models) {
-    const { inline, field } = buildPayloads(model, promptText, dataUri, bytes);
+    const { inline, field } = buildPayloads(model, promptText, dataUri, bytes, mode);
 
     // Gemma uses multimodal messages; the top-level image field is a legacy format.
     const attempts = model === DEFAULT_MODEL ? [inline] : [inline, field];
@@ -270,7 +354,7 @@ export async function analyzeChart(env, opts) {
         const text = extractText(res);
         const parsed = extractJson(text);
         if (parsed) {
-          return { data: normalize(parsed), model, warnings: [] };
+          return { data: normalize(parsed), model, mode, warnings: [] };
         }
         errors.push(`${model}: не удалось распарсить JSON (${text.slice(0, 120)}…)`);
       } catch (err) {

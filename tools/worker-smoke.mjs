@@ -58,8 +58,11 @@ const ANALYSIS = {
   recommendation: "Вход по плану.",
 };
 
+let lastAIBody = null;
+
 const fakeAI = (behavior) => ({
-  async run() {
+  async run(_model, body) {
+    lastAIBody = body;
     if (behavior === "fail") throw new Error("AI недоступен");
     return { response: JSON.stringify(ANALYSIS) };
   },
@@ -144,6 +147,16 @@ const json = async (res) => {
   check("POST /api/analyze с ключом → 200 + анализ + ставка", res.status === 200 && d.ok && d.analysis && d.sizing && d.sizing.stake === 20, JSON.stringify(d).slice(0, 200));
   check("анализ бинарки: направление call и экспирация 3m", d.analysis && d.analysis.signal.direction === "call" && d.analysis.signal.expiry === "3m", JSON.stringify(d.analysis && d.analysis.signal));
   check("ставка: выигрыш 17$ и break-even 54.05%", d.sizing && d.sizing.potentialProfit === 17 && d.sizing.breakEvenWinRate === 54.05, JSON.stringify(d.sizing));
+  check("по умолчанию быстрый режим: thinking выключен, бюджет 2048", d.mode === "fast" && typeof d.ms === "number" && lastAIBody && lastAIBody.chat_template_kwargs && lastAIBody.chat_template_kwargs.enable_thinking === false && lastAIBody.max_completion_tokens === 2048, JSON.stringify(lastAIBody && lastAIBody.chat_template_kwargs) + " " + (lastAIBody && lastAIBody.max_completion_tokens));
+}
+{
+  const res = await call("/api/analyze", {
+    method: "POST",
+    headers: { "X-Api-Key": KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({ image: "data:image/png;base64,AAAA", mode: "deep" }),
+  });
+  const d = await json(res);
+  check("mode=deep включает thinking с бюджетом 4096", res.status === 200 && d.mode === "deep" && lastAIBody && lastAIBody.chat_template_kwargs && lastAIBody.chat_template_kwargs.enable_thinking === true && lastAIBody.max_completion_tokens === 4096, JSON.stringify(lastAIBody && lastAIBody.chat_template_kwargs));
 }
 {
   const env = { ACCESS_KEY: KEY, AI: fakeAI("fail") };
