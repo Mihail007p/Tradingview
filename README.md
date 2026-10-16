@@ -50,9 +50,26 @@ npx wrangler kv namespace create JOURNAL
 ```
 
 В CI это делает `scripts/ensure-kv.sh`. Если у токена `CLOUDFLARE_API_TOKEN` нет
-прав на Workers KV Storage, скрипт напечатает причину отказа Cloudflare; можно
-создать неймспейс вручную и положить его id в секрет/переменную репозитория
-`KV_NAMESPACE_ID` — деплой подхватит его сам.
+прав на Workers KV Storage, скрипт напечатает причину отказа Cloudflare:
+
+```
+Cloudflare: [10000] Authentication error
+→ похоже, у CLOUDFLARE_API_TOKEN нет прав на Workers KV Storage (Edit).
+```
+
+Что делать в этом случае (любой из вариантов):
+
+1. Cloudflare Dashboard → **My Profile → API Tokens → Edit** у используемого токена →
+   добавить право **Workers KV Storage: Edit** → сохранить. Следующий деплой сам
+   создаст неймспейс и привяжет его.
+2. Создать неймспейс руками: Cloudflare Dashboard → **Workers & Pages → KV →
+   Create namespace** (имя, например, `chart-analyst-bot-JOURNAL`) → скопировать
+   **ID** → GitHub → Settings → Secrets and variables → Actions →
+   новый **secret или variable `KV_NAMESPACE_ID`** со значением id. CI подхватит его
+   и допишет binding в `wrangler.toml` при деплое.
+
+Пока KV не настроен, журнал автоматически работает локально в браузере — сайт
+остаётся рабочим.
 
 ## 🧪 Локальный запуск и проверки
 
@@ -90,8 +107,11 @@ npm test             # check + тест scripts/ensure-kv.sh
    в скрипте интерфейса; ловится `npm run check` (раньше это был
    `TypeError: $ is not a function`).
 3. **Анализ не идёт, статус «Нужен ключ доступа»** — введи ключ в поле в шапке.
-4. **«журнал локально (KV не подключён)»** — серверный журнал не настроен, сделки
-   пишутся в браузер; см. раздел про журнал выше.
+4. **«Серверный журнал недоступен … сделки сохраняются локально»** — либо KV не
+   привязан к воркеру (см. раздел про журнал выше), либо ключ доступа ещё не введён. Проверить
+   состояние можно запросом: `curl https://chart-analyst-bot.prachkevich19.workers.dev/api/health`
+   — `"journal": true` означает, что серверный журнал работает, `"auth": true` —
+   что сайт требует ключ.
 5. **«Модель не вернула корректный анализ»** — Workers AI не разобрал скриншот:
    нужен более чёткий график (или проверь, что Workers AI включён в аккаунте).
 
