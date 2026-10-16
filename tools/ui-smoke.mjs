@@ -1,21 +1,23 @@
 /**
- * UI smoke check — запускает инлайновый <script> из src/ui.js в песочнице
+ * UI smoke check — запускает инлайновый <script> из ответа ui() в песочнице
  * с DOM-заглушками и падает, если скрипт бросает ошибку при загрузке.
  *
  *   node tools/ui-smoke.mjs
  *
  * Зачем: страница отдаётся воркером как единый HTML, и любая ошибка времени
- * выполнения в начале скрипта (как TypeError: $ is not a function) полностью
- * убивает интерфейс — кнопки, табы, журнал перестают работать, а на экране
- * остаётся «пустой» сайт. Такой тест ловит это до деплоя.
+ * выполнения (или SyntaxError!) в скрипте полностью убивает интерфейс —
+ * кнопки, табы, загрузка скриншота и пароль перестают работать, а на экране
+ * остаётся «пустой» сайт.
+ *
+ * ВАЖНО: скрипт берётся ИМЕННО из html, который отдаёт ui() после обработки
+ * template literal, а не из текста src/ui.js. Раньше тест смотрел на текст
+ * файла и не видел, что escape-последовательности template literal портят
+ * клиентский скрипт (SyntaxError «Unexpected identifier 'font'» на странице,
+ * из-за которого «после выбора скриншота ничего не происходило»).
  */
 
-import fs from "node:fs";
-import path from "node:path";
 import vm from "node:vm";
-import { fileURLToPath } from "node:url";
-
-const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+import { ui } from "../src/ui.js";
 
 function el(id) {
   return {
@@ -114,8 +116,10 @@ function buildSandbox(scenario) {
   return sandbox;
 }
 
-const source = fs.readFileSync(path.join(ROOT, "src", "ui.js"), "utf8");
-const match = source.match(/<script>([\s\S]*?)<\/script>/);
+// Скрипт именно из ответа ui() (то, что реально получает браузер), —
+// только так ловятся ошибки обработки escape в template literal.
+const html = ui();
+const match = html.match(/<script>([\s\S]*?)<\/script>/);
 if (!match) {
   console.error("✖ src/ui.js: не найден инлайновый <script> с логикой интерфейса");
   process.exit(1);

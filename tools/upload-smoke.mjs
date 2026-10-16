@@ -1,7 +1,7 @@
 /**
  * Upload smoke check — прогоняет добавление скриншота в инлайновом <script>
- * из src/ui.js через настоящие обработчики событий (change / click / drop /
- * paste), а не только загрузку страницы.
+ * из ответа ui() (то, что реально получает браузер) через настоящие обработчики
+ * событий (change / click / drop / paste), а не только загрузку страницы.
  *
  *   node tools/upload-smoke.mjs
  *
@@ -17,12 +17,8 @@
  * слушателей событий.
  */
 
-import fs from "node:fs";
-import path from "node:path";
 import vm from "node:vm";
-import { fileURLToPath } from "node:url";
-
-const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+import { ui } from "../src/ui.js";
 
 function makeEl(id) {
   const classes = new Set();
@@ -144,8 +140,11 @@ function buildSandbox() {
 
 const tick = () => new Promise((r) => setTimeout(r, 20));
 
-const source = fs.readFileSync(path.join(ROOT, "src", "ui.js"), "utf8");
-const match = source.match(/<script>([\s\S]*?)<\/script>/);
+// Скрипт и разметка — из ответа ui(), а не из текста src/ui.js: страница
+// уходит в браузер ПОСЛЕ обработки template literal, и именно там ловились
+// расхождения экранирования (SyntaxError → «после выбора скриншота тишина»).
+const html = ui();
+const match = html.match(/<script>([\s\S]*?)<\/script>/);
 if (!match) {
   console.error("✖ src/ui.js: не найден инлайновый <script>");
   process.exit(1);
@@ -244,8 +243,8 @@ ok("drop через dataTransfer.items добавляет скриншот", $("
 // клик выглядел как «ничего не происходит». Эмулируем поведение браузера:
 // клик по label активирует связанное поле файла.
 fire($("drop"), "click", { target: $("drop") });
-const labelLinked = /<label[^>]*id="drop"[^>]*for="file"/.test(source);
-const inputHiddenNotNone = !/#file\s*\{\s*display\s*:\s*none/.test(source);
+const labelLinked = /<label[^>]*id="drop"[^>]*for="file"/.test(html);
+const inputHiddenNotNone = !/#file\s*\{\s*display\s*:\s*none/.test(html);
 ok("зона загрузки связана с полем файла через <label for>", labelLinked);
 ok("поле файла не спрятано через display:none", inputHiddenNotNone);
 if (labelLinked) fileEl.click(); // нативная активация label браузером

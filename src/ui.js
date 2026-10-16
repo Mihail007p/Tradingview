@@ -1,6 +1,15 @@
 /**
  * Single-page UI. Served as a string from the Worker (no build step, no CDN).
  * Client JS avoids template literals so this file stays a clean JS template string.
+ *
+ * NB (важно про экранирование): весь HTML и клиентский скрипт лежат ВНУТРИ
+ * template literal, поэтому браузер получает текст ПОСЛЕ обработки escape-
+ * последовательностей: \" → ", \\. → \., \\n → \n и т.д. Отсюда правила:
+ *  1) каждая «\», которая должна попасть на страницу, пишется удвоенной (\\.);
+ *  2) кавычки HTML-атрибутов внутри JS-строк клиента — в одинарных ('...'),
+ *     иначе \" превратится в " и оборвёт строку (SyntaxError на всей странице);
+ *  3) tools/ui-smoke.mjs и tools/upload-smoke.mjs проверяют скрипт ИМЕННО из
+ *     ответа ui(), а не текст файла — расхождение ловится до деплоя.
  */
 
 export function ui() {
@@ -415,37 +424,49 @@ export function ui() {
     });
   });
 
-  // ---------- health ----------
+  // ---------- health / статус ----------
+  // Статус собирается из двух независимых частей: проверка ключа (health) и
+  // состояние журнала (серверный/локальный). Раньше они перетирали текст друг
+  // друга: при вводе верного пароля статус мог остаться «журнал локально · …»
+  // без «ключ принят» — выглядело так, будто пароль не применился.
+  var healthInfo = null; // ответ /api/health или { offline:true }
+  function refreshStatus(){
+    var dot = $("dot"), st = $("status");
+    if (!dot || !st) return;
+    if (healthInfo && healthInfo.offline){
+      dot.className = "dot bad";
+      st.textContent = "сервер недоступен";
+      return;
+    }
+    // Сервер сообщает, принят ли присланный ключ (keyValid). Раньше статус
+    // при любом пароле показывал «онлайн», и понять, что пароль не подошёл,
+    // было невозможно.
+    if (healthInfo && healthInfo.auth && !healthInfo.keyValid){
+      dot.className = "dot bad";
+      st.textContent = KEY ? "неверный ключ доступа" : "нужен ключ доступа";
+      return;
+    }
+    var model = healthInfo ? (healthInfo.model || "").replace("@cf/meta/","") : "";
+    var keyNote = healthInfo && healthInfo.auth ? " · ключ принят" : "";
+    if (journalLocal){
+      dot.className = "dot warn";
+      st.textContent = (healthInfo ? "онлайн · " + model + keyNote + " · " : "") +
+        "журнал локально" + (journalReason ? " (" + journalReason + ")" : "");
+      return;
+    }
+    if (healthInfo && !healthInfo.journal){
+      dot.className = "dot warn";
+      st.textContent = "онлайн · журнал локально (KV не подключён)" + keyNote;
+      return;
+    }
+    dot.className = "dot ok";
+    st.textContent = "онлайн · " + model + keyNote;
+  }
   function health(){
     fetch(API + "/api/health", { headers: hdr() })
       .then(function(r){ return r.json(); })
-      .then(function(d){
-        var model = (d.model || "").replace("@cf/meta/","");
-        // Сервер теперь сообщает, принят ли присланный ключ (keyValid).
-        // Раньше статус при любом пароле показывал «онлайн», и понять,
-        // что пароль не подошёл, было невозможно.
-        if (d.auth && !d.keyValid){
-          $("dot").className = "dot bad";
-          $("status").textContent = KEY ? "неверный ключ доступа" : "нужен ключ доступа";
-          return;
-        }
-        var keyNote = d.auth ? " · ключ принят" : "";
-        if (journalLocal){
-          // статус уже показывает локальный журнал — не перетираем
-          $("dot").className = "dot warn";
-          $("status").textContent = "онлайн · " + model + keyNote + " · журнал локально";
-          return;
-        }
-        $("dot").className = "dot ok";
-        $("status").textContent = d.journal
-          ? "онлайн · " + model + keyNote
-          : "онлайн · журнал локально (KV не подключён)" + keyNote;
-        if (!d.journal) $("dot").className = "dot warn";
-      })
-      .catch(function(){
-        $("dot").className = "dot bad";
-        $("status").textContent = "сервер недоступен";
-      });
+      .then(function(d){ healthInfo = d; refreshStatus(); })
+      .catch(function(){ healthInfo = { offline: true }; refreshStatus(); });
   }
   health();
 
@@ -476,7 +497,9 @@ export function ui() {
   function looksLikeImage(f){
     if (!f) return false;
     if (f.type && f.type.indexOf("image/") === 0) return true;
-    if (/\.(png|jpe?g|webp|gif|bmp|avif|heic|heif)$/i.test(String(f.name || ""))) return true;
+    // NB: \\. в исходнике → \. на странице: template literal ui() съедает один
+    // уровень backslash-эскейпов, поэтому каждый нужный \ пишем удвоенным.
+    if (/\\.(png|jpe?g|webp|gif|bmp|avif|heic|heif)$/i.test(String(f.name || ""))) return true;
     // тип пуст (drag-and-drop, буфер обмена) — даём шанс декодировщику
     return !f.type || f.type === "application/octet-stream";
   }
@@ -533,7 +556,14 @@ export function ui() {
 
   function handleFiles(files){
     var f = files && files[0];
-    if (!f) return;
+    if (!f){
+      // Раньше здесь был молчаливый return: часть браузеров (встроенные
+      // WebView, выбор из облака) отдают change с пустым списком файлов —
+      // пользователь видел «ничего не происходит». Теперь всегда есть подсказка.
+      showImageError("Браузер не передал файл. Попробуй выбрать скриншот ещё раз " +
+        "(или перетащи его в эту зону / вставь Ctrl+V).");
+      return;
+    }
     if (f.size === 0){
       showImageError("Файл пустой — скриншот не сохранился. Сделай скриншот ещё раз.");
       return;
@@ -741,7 +771,13 @@ export function ui() {
       var el = document.getElementById("waitmsg");
       if (!el){ clearInterval(waitTimer); return; }
       var sec = Math.round((Date.now() - t0) / 1000);
-      el.innerHTML = "Модель читает график… " + sec + " с<br><span style=\"font-size:12px\">" + hint + "</span>";
+      // NB: HTML-атрибуты внутри JS-строки пишем в одинарных кавычках.
+      // Раньше здесь стояло style=\"...\", и template literal ui() «съедал»
+      // обратный слеш: на страницу уходило style="..." ВНУТРИ двойных кавычек
+      // JS-строки → SyntaxError «Unexpected identifier 'font'» → весь скрипт
+      // страницы мёртв: диалог выбора файла открывался (нативный label), но
+      // после «ОК» ничего не происходило, пароль не сохранялся.
+      el.innerHTML = "Модель читает график… " + sec + " с<br><span style='font-size:12px'>" + hint + "</span>";
     }, 500);
 
     var payload = {
@@ -883,10 +919,7 @@ export function ui() {
     if (journalLocal) return;
     journalLocal = true;
     journalReason = reason || "серверный журнал недоступен";
-    var $st = $("status");
-    if ($st) $st.textContent = "журнал локально · " + journalReason;
-    var $dot = $("dot");
-    if ($dot) $dot.className = "dot warn";
+    refreshStatus();
   }
 
   // один общий запрос: всегда отдаёт { status, body }, без падений на не-JSON
@@ -1023,7 +1056,6 @@ export function ui() {
         + '<td class="num">' + fmt(t.entry) + "</td>"
         + '<td class="num">' + esc(t.expiry || "—") + "</td>"
         + '<td class="num">$' + fmt(t.stake) + "</td>"
-        + '<td class="num">' + fmt(t.risk_reward) + "</td>"
         + '<td class="num">' + (t.confidence ? t.confidence + "%" : "—") + "</td>"
         + '<td class="num ' + stCls + '"><b>' + stTxt + "</b>"
         + (t.resultR !== null && t.resultR !== undefined ? '<br><span style="font-size:11.5px">' + (t.resultR>0?"+":"") + fmt(t.resultR) + "R</span>" : "")
