@@ -3,12 +3,26 @@ name: opencode
 on:
   issue_comment:
     types: [created]
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: Задача для OpenCode
+        required: true
+        type: string
 
 jobs:
   opencode:
     if: |
-      github.event.comment.user.login == 'Mihail007p' &&
-      contains(github.event.comment.body, '/opencode')
+      (github.event_name == 'issue_comment' &&
+       github.event.comment.user.login == 'Mihail007p' &&
+       contains(github.event.comment.body, '/opencode')) ||
+      (github.event_name == 'issues' &&
+       github.event.issue.user.login == 'Mihail007p' &&
+       contains(github.event.issue.body, '/opencode')) ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.actor == 'Mihail007p')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -30,5 +44,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           model: cloudflare-workers-ai/@cf/qwen/qwen3.8-27b
+          prompt: ${{ github.event_name == 'issues' && github.event.issue.body || inputs.prompt }}
           use_github_token: true
           share: false
