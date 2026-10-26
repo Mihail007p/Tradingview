@@ -20,7 +20,7 @@ jobs:
        contains(github.event.comment.body, '/opencode')) ||
       (github.event_name == 'issues' &&
        github.event.issue.user.login == 'Mihail007p' &&
-       contains(github.event.issue.body, '/opencode')) ||
+       startsWith(github.event.issue.title, '/opencode')) ||
       (github.event_name == 'workflow_dispatch' &&
        github.actor == 'Mihail007p')
     runs-on: ubuntu-latest
@@ -36,6 +36,21 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Check Cloudflare credentials
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY || secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Add the actual Cloudflare Account ID as repository secret CLOUDFLARE_ACCOUNT_ID or Actions variable CLOUDFLARE_ACCOUNT_ID."
+            exit 1
+          fi
+          if [ -z "${CLOUDFLARE_API_KEY:-}" ]; then
+            echo "::error::Add the actual Workers AI API token as repository secret CLOUDFLARE_API_KEY."
+            exit 1
+          fi
+          echo "Cloudflare credentials are present (values are not printed)."
+
       - name: Run OpenCode
         uses: anomalyco/opencode/github@latest
         env:
@@ -44,6 +59,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           model: cloudflare-workers-ai/@cf/qwen/qwen3.8-27b
-          prompt: ${{ github.event_name == 'issues' && github.event.issue.body || inputs.prompt }}
+          prompt: >-
+            ${{ github.event_name == 'issues' && format('Выполни задачу из Issue #{0}: {1}', github.event.issue.number, github.event.issue.body) || inputs.prompt }}
           use_github_token: true
           share: false

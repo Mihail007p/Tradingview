@@ -1,0 +1,16 @@
+name: Задание для OpenCode
+description: Попросить OpenCode изменить код в этом репозитории.
+title: "/opencode"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        После отправки формы OpenCode автоматически начнёт задачу. Обрабатывать задания может только владелец репозитория.
+  - type: textarea
+    id: task
+    attributes:
+      label: Что нужно сделать?
+      description: Опишите желаемый результат и важные ограничения.
+      placeholder: Например, создай hello.py с функцией приветствия и тест к ней.
+    validations:
+      required: true

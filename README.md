@@ -27,6 +27,16 @@ OpenCode запускается, если `/opencode` есть в новом к�
 
 Cloudflare AI binding задаётся в `wrangler.toml`; ключ провайдера не требуется передавать браузеру. В аккаунте должна быть включена Workers AI и доступна выбранная модель.
 
+## Запуск OpenCode с телефона
+
+1. Сначала добавьте реальные Cloudflare credentials в `Settings → Secrets and variables → Actions`:
+   - `CLOUDFLARE_ACCOUNT_ID` — Account ID (Secret или Variable).
+   - `CLOUDFLARE_API_KEY` — Workers AI API token (Secret). Если уже настроен `CLOUDFLARE_API_TOKEN`, workflow также попробует его.
+2. Откройте [форму задания OpenCode](https://github.com/Mihail007p/Tradingview/issues/new?template=opencode.yml), введите задачу и нажмите **Submit new issue**.
+3. Workflow стартует автоматически; смотрите результат во вкладке **Actions**. После выполнения агент ответит в Issue и, если нужно, откроет PR.
+
+Также можно оставить `/opencode ...` отдельным комментарием к Issue либо запустить workflow вручную в **Actions → opencode → Run workflow**. Все автоматические запуски из Issue ограничены аккаунтом `Mihail007p`.
+
 ## Проверки и локальный запуск
 
 ```sh
