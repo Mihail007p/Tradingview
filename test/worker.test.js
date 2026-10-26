@@ -13,7 +13,11 @@ function env(overrides = {}) {
     ACCESS_KEY: "test-private-key",
     AI: {
       async run(model, input) {
-        assert.equal(model, "@cf/qwen/qwen3.8-27b");
+        assert.ok([
+          "@cf/qwen/qwen3.8-27b",
+          "@cf/qwen/qwen3-30b-a3b-fp8",
+          "@cf/openai/gpt-oss-20b",
+        ].includes(model));
         assert.equal(input.messages[0].role, "system");
         return { response: "Привет! Рад помочь." };
       },
@@ -32,7 +36,12 @@ test("status reports whether private access is configured without exposing it", 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     configured: true,
-    model: "@cf/qwen/qwen3.8-27b",
+    defaultModel: "@cf/qwen/qwen3.8-27b",
+    models: [
+      { id: "@cf/qwen/qwen3.8-27b", name: "Qwen 3.8 · 27B" },
+      { id: "@cf/qwen/qwen3-30b-a3b-fp8", name: "Qwen3 · 30B A3B" },
+      { id: "@cf/openai/gpt-oss-20b", name: "GPT-OSS · 20B" },
+    ],
   });
 
   const locked = await worker.fetch(request("/api/status"), env({ ACCESS_KEY: "" }));
@@ -70,7 +79,11 @@ test("chat authenticates, forwards validated messages, and returns the model ans
   const testEnv = env({
     AI: {
       async run(model, input) {
-        assert.equal(model, "@cf/qwen/qwen3.8-27b");
+        assert.ok([
+          "@cf/qwen/qwen3.8-27b",
+          "@cf/qwen/qwen3-30b-a3b-fp8",
+          "@cf/openai/gpt-oss-20b",
+        ].includes(model));
         receivedMessages = input.messages;
         return { response: "Ответ модели" };
       },
@@ -94,8 +107,38 @@ test("chat authenticates, forwards validated messages, and returns the model ans
   assert.deepEqual(await response.json(), {
     answer: "Ответ модели",
     model: "@cf/qwen/qwen3.8-27b",
+    modelName: "Qwen 3.8 · 27B",
   });
   assert.equal(receivedMessages.at(-1).content, "Привет");
+});
+
+test("chat honors an allowed model selection and rejects unknown models", async () => {
+  let selectedModel;
+  const testEnv = env({
+    AI: {
+      async run(model) {
+        selectedModel = model;
+        return { response: "Готово" };
+      },
+    },
+  });
+  const headers = { ...jsonHeaders, "x-chat-access-key": "test-private-key" };
+  const messages = [{ role: "user", content: "Проверка модели" }];
+
+  const response = await worker.fetch(request("/api/chat", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ messages, model: "@cf/openai/gpt-oss-20b" }),
+  }), testEnv);
+  assert.equal(response.status, 200);
+  assert.equal(selectedModel, "@cf/openai/gpt-oss-20b");
+
+  const unknown = await worker.fetch(request("/api/chat", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ messages, model: "not-a-real-model" }),
+  }), testEnv);
+  assert.equal(unknown.status, 400);
 });
 
 test("chat rejects malformed, oversized, and non-user-final conversations", async () => {

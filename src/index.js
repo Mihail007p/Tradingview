@@ -1,4 +1,9 @@
-const MODEL = "@cf/qwen/qwen3.8-27b";
+const DEFAULT_MODEL = "@cf/qwen/qwen3.8-27b";
+const AVAILABLE_MODELS = new Map([
+  ["@cf/qwen/qwen3.8-27b", "Qwen 3.8 · 27B"],
+  ["@cf/qwen/qwen3-30b-a3b-fp8", "Qwen3 · 30B A3B"],
+  ["@cf/openai/gpt-oss-20b", "GPT-OSS · 20B"],
+]);
 const MAX_MESSAGES = 24;
 const MAX_MESSAGE_LENGTH = 8_000;
 const MAX_TOTAL_LENGTH = 32_000;
@@ -72,7 +77,11 @@ function errorMessage(error) {
 
 async function handleApi(request, env, pathname) {
   if (request.method === "GET" && pathname === "/api/status") {
-    return json({ configured: Boolean(env.ACCESS_KEY), model: MODEL });
+    return json({
+      configured: Boolean(env.ACCESS_KEY),
+      defaultModel: DEFAULT_MODEL,
+      models: [...AVAILABLE_MODELS].map(([id, name]) => ({ id, name })),
+    });
   }
 
   if (request.method === "POST" && pathname === "/api/auth") {
@@ -104,13 +113,19 @@ async function handleApi(request, env, pathname) {
     }
 
     const body = await readJson(request);
+    const modelId = typeof body?.model === "string" ? body.model : DEFAULT_MODEL;
+    const modelName = AVAILABLE_MODELS.get(modelId);
+    if (!modelName) {
+      return json({ error: "Выбрана неизвестная модель. Обновите страницу и выберите модель из списка." }, 400);
+    }
+
     const messages = cleanMessages(body?.messages);
     if (!messages) {
       return json({ error: "Проверьте формат и размер сообщения." }, 400);
     }
 
     try {
-      const result = await env.AI.run(MODEL, {
+      const result = await env.AI.run(modelId, {
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
         max_tokens: 1_500,
         temperature: 0.4,
@@ -122,7 +137,7 @@ async function handleApi(request, env, pathname) {
         return json({ error: "Модель вернула пустой ответ. Попробуйте ещё раз." }, 502);
       }
 
-      return json({ answer: answer.trim(), model: MODEL });
+      return json({ answer: answer.trim(), model: modelId, modelName });
     } catch (error) {
       console.error("Workers AI request failed:", errorMessage(error));
       return json({ error: "Cloudflare AI временно недоступен. Проверьте квоту и попробуйте позже." }, 502);

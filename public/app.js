@@ -12,12 +12,15 @@ const messagesNode = document.querySelector("#messages");
 const composer = document.querySelector("#composer");
 const input = document.querySelector("#message-input");
 const sendButton = document.querySelector("#send-button");
+const modelSelect = document.querySelector("#model-select");
+const sidebarModelName = document.querySelector("#sidebar-model-name");
 const connectionLabel = document.querySelector("#connection-label");
 const secureBadge = document.querySelector(".secure-badge");
 const toastNode = document.querySelector("#toast");
 const topbarTitle = document.querySelector("#topbar-title");
 
 const ACCESS_STORAGE_KEY = "luma-chat-access";
+const MODEL_STORAGE_KEY = "luma-chat-model";
 let accessKey = "";
 let messages = [];
 let busy = false;
@@ -37,6 +40,27 @@ function showToast(message) {
 function setConnection(online, label) {
   connectionLabel.textContent = label;
   secureBadge.classList.toggle("is-online", online);
+}
+
+function setModelOptions(models, defaultModel) {
+  if (!Array.isArray(models) || models.length === 0) return;
+  modelSelect.replaceChildren();
+  for (const model of models) {
+    if (!model || typeof model.id !== "string" || typeof model.name !== "string") continue;
+    const option = document.createElement("option");
+    option.value = model.id;
+    option.textContent = model.name;
+    modelSelect.append(option);
+  }
+  const saved = sessionStorage.getItem(MODEL_STORAGE_KEY);
+  const selected = models.some((model) => model.id === saved) ? saved : defaultModel;
+  if (models.some((model) => model.id === selected)) modelSelect.value = selected;
+  syncModelLabel();
+}
+
+function syncModelLabel() {
+  const selected = modelSelect.selectedOptions[0];
+  if (selected) sidebarModelName.textContent = selected.textContent;
 }
 
 function setReady(ready) {
@@ -172,7 +196,10 @@ async function sendMessage(text) {
   addThinking();
 
   try {
-    const data = await jsonRequest("/api/chat", { messages: messages.slice(-24) }, accessKey);
+    const data = await jsonRequest("/api/chat", {
+      messages: messages.slice(-24),
+      model: modelSelect.value,
+    }, accessKey);
     messages.push({ role: "assistant", content: data.answer });
     document.querySelector("#thinking")?.remove();
     addMessage("assistant", data.answer);
@@ -195,6 +222,7 @@ async function initialize() {
   try {
     const response = await fetch("/api/status", { cache: "no-store" });
     const status = await response.json();
+    setModelOptions(status.models, status.defaultModel);
     if (!status.configured) {
       setConnection(false, "Нужно настроить доступ");
       showGate(true);
@@ -266,6 +294,12 @@ input.addEventListener("keydown", (event) => {
     event.preventDefault();
     composer.requestSubmit();
   }
+});
+
+modelSelect.addEventListener("change", () => {
+  sessionStorage.setItem(MODEL_STORAGE_KEY, modelSelect.value);
+  syncModelLabel();
+  showToast(`Выбрана модель: ${modelSelect.selectedOptions[0]?.textContent ?? modelSelect.value}`);
 });
 
 document.querySelectorAll(".suggestion").forEach((button) => {
