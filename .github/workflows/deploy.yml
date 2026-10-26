@@ -32,33 +32,33 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Check Cloudflare deploy credentials
+      - name: Check Cloudflare deploy settings
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_KEY }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
-            echo "::error::Add CLOUDFLARE_ACCOUNT_ID as a repository Secret or Actions Variable."
-            exit 1
-          fi
-          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-            echo "::error::Add a Cloudflare API token as CLOUDFLARE_API_TOKEN. It needs Workers Scripts Edit permission."
-            exit 1
-          fi
-          echo "Cloudflare deployment credentials are present (values are not printed)."
-      - name: Deploy Worker and static site
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_KEY }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx --yes wrangler@4 deploy
-      - name: Upload private chat key (if configured)
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
           ACCESS_KEY: ${{ secrets.ACCESS_KEY }}
         run: |
-          if [ -z "${ACCESS_KEY:-}" ]; then
-            echo "::warning::ACCESS_KEY is not configured. The site will deploy, but chat requests will stay locked."
-          else
-            printf '%s' "$ACCESS_KEY" | npx --yes wrangler@4 secret put ACCESS_KEY
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::error::Add the actual CLOUDFLARE_ACCOUNT_ID as a repository Secret or Actions Variable."
+            exit 1
           fi
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::Add CLOUDFLARE_API_TOKEN as a repository Secret. It must have Account > Workers Scripts > Edit permission."
+            exit 1
+          fi
+          if [ -z "${ACCESS_KEY:-}" ]; then
+            echo "::error::Add ACCESS_KEY as a repository Secret. This is the private password you will enter on the chat website."
+            exit 1
+          fi
+          echo "Required Cloudflare settings are present (values are not printed)."
+      - name: Deploy Worker and static site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy
+      - name: Upload private chat key
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          ACCESS_KEY: ${{ secrets.ACCESS_KEY }}
+        run: printf '%s' "$ACCESS_KEY" | npx --yes wrangler@4 secret put ACCESS_KEY

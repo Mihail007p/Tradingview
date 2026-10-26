@@ -15,13 +15,13 @@
 
 **Repository secrets**
 
-- `CLOUDFLARE_API_TOKEN` — токен Cloudflare с правом редактировать Workers Scripts.
-- `CLOUDFLARE_ACCOUNT_ID` — Cloudflare Account ID. Можно задать его как repository variable с таким же именем.
-- `ACCESS_KEY` — придумайте длинную случайную фразу. Это пароль, который вы будете вводить на странице чата; это **не** Cloudflare API-токен.
+- `CLOUDFLARE_API_TOKEN` — отдельный Cloudflare API Token с разрешением **Account → Workers Scripts → Edit**. `CLOUDFLARE_API_KEY` для OpenCode не заменяет этот токен деплоя.
+- `CLOUDFLARE_ACCOUNT_ID` — реальный Cloudflare Account ID. Можно задать как Secret или Actions Variable.
+- `ACCESS_KEY` — придумайте длинную случайную фразу. Это пароль для входа на сайт чата, не Cloudflare API-токен.
 
 После добавления секретов успешный push/merge в `main` запустит workflow `Deploy AI chat to Cloudflare`. Он публикует страницу на адрес вида `https://chart-analyst-bot.<ваш-workers.dev-домен>` и загружает `ACCESS_KEY` в Worker как secret. Точный URL появится в логе шага `Deploy Worker and static site` в Actions и в Cloudflare Dashboard → Workers & Pages → `chart-analyst-bot`.
 
-Workflow читает `CLOUDFLARE_ACCOUNT_ID` сначала из Secrets, затем из Variables. Если `ACCESS_KEY` отсутствует, сайт развернётся, но API чата останется закрытым — добавьте секрет и запустите деплой снова.
+Workflow проверяет все три значения до деплоя и завершится с понятной ошибкой, если какое-либо отсутствует. `CLOUDFLARE_ACCOUNT_ID` читается сначала из Secrets, затем из Variables. После успешного деплоя URL будет в логе Actions и в Cloudflare Dashboard.
 
 OpenCode запускается, если `/opencode` есть в новом комментарии, в описании нового Issue от владельца или в ручном запуске через **Actions → opencode → Run workflow**. Автоматические запуски ограничены аккаунтом `Mihail007p`.
 
