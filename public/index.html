@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101116">
+    <meta name="description" content="Личный ИИ-чат на Cloudflare Workers AI.">
+    <title>ИИ-чат · Cloudflare</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <div class="layout">
+      <aside class="sidebar" aria-label="Боковая панель">
+        <a class="brand" href="/" aria-label="ИИ-чат — главная">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none"><path d="M7.5 18.2c.5-4 3.9-7.1 8.1-7.1 3.3 0 6.2 2 7.5 4.9 2.7.1 4.9 2.3 4.9 5 0 2.8-2.3 5.1-5.1 5.1H9.6c-3.3 0-6-2.7-6-6 0-2.4 1.6-4.6 3.9-5.4Z" fill="currentColor" opacity=".95"/><path d="m13 18.8 2.2-3.3 2.1 3.3 2.2-3.3" stroke="#15161d" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="brand-copy"><strong>luma</strong><small>личный AI-чат</small></span>
+        </a>
+
+        <button class="new-chat-button" id="new-chat" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>
+          <span>Новый диалог</span>
+          <kbd>⌘ K</kbd>
+        </button>
+
+        <div class="sidebar-rule"></div>
+        <p class="side-label">ПРОСТРАНСТВО</p>
+        <div class="space-card">
+          <span class="space-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4.5h12v11H4zM7 7.5h6M7 10h6M7 12.5h3"/></svg></span>
+          <span><strong>Мои диалоги</strong><small>Хранятся только в этой вкладке</small></span>
+        </div>
+
+        <div class="sidebar-bottom">
+          <div class="model-card">
+            <span class="model-orb" aria-hidden="true"></span>
+            <span><small>МОДЕЛЬ</small><strong>Qwen 3.8 · 27B</strong><em>Cloudflare Workers AI</em></span>
+          </div>
+          <button class="account-button" id="sign-out" type="button">
+            <span class="avatar">М</span><span class="account-copy"><strong>Личный доступ</strong><small>Защищённый чат</small></span>
+            <svg class="exit-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M8 4H4.5v12H8M11 6l4 4-4 4M6 10h9"/></svg>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main-panel">
+        <header class="topbar">
+          <div class="mobile-brand"><span class="brand-mark mini" aria-hidden="true">✳</span><strong>luma</strong></div>
+          <div class="breadcrumbs"><span>Чат</span><span class="crumb-slash">/</span><strong id="topbar-title">Новый диалог</strong></div>
+          <div class="top-actions">
+            <span class="secure-badge"><span class="secure-dot"></span><span id="connection-label">Проверяем подключение</span></span>
+            <button class="icon-button" id="clear-chat" type="button" title="Очистить диалог" aria-label="Очистить диалог"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.5h12M8 5.5V4h4v1.5m2.5 0-.7 10H6.2l-.7-10M8.5 8v5m3-5v5"/></svg></button>
+          </div>
+        </header>
+
+        <section class="chat-area" aria-label="Диалог">
+          <div class="conversation" id="conversation" aria-live="polite">
+            <section class="welcome" id="welcome">
+              <div class="welcome-symbol" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+              <p class="eyebrow"><span class="sparkle">✳</span> ВАШЕ ПРОСТРАНСТВО ДЛЯ ИДЕЙ</p>
+              <h1>О чём поговорим<span class="title-period">?</span></h1>
+              <p class="welcome-copy">Задайте вопрос, разберите сложную тему или вместе найдём решение. Начните с идеи — дальше разберёмся.</p>
+              <div class="suggestions" id="suggestions">
+                <button class="suggestion" type="button" data-prompt="Помоги придумать план для небольшого проекта и разбей его на понятные шаги."><span class="suggestion-icon lavender">✦</span><span><strong>Спланировать проект</strong><small>От идеи до первых шагов</small></span><span class="suggestion-arrow">↗</span></button>
+                <button class="suggestion" type="button" data-prompt="Объясни сложную тему простыми словами и приведи наглядный пример."><span class="suggestion-icon mint">⌁</span><span><strong>Разобраться в теме</strong><small>Понятно и с примерами</small></span><span class="suggestion-arrow">↗</span></button>
+                <button class="suggestion" type="button" data-prompt="Помоги написать или проверить код. Сначала уточни язык и задачу, если это важно."><span class="suggestion-icon peach">{ }</span><span><strong>Поработать с кодом</strong><small>Написать, объяснить, улучшить</small></span><span class="suggestion-arrow">↗</span></button>
+                <button class="suggestion" type="button" data-prompt="Составь список вопросов, которые помогут мне принять взвешенное решение по моей задаче."><span class="suggestion-icon blue">◎</span><span><strong>Принять решение</strong><small>Взвесить варианты и риски</small></span><span class="suggestion-arrow">↗</span></button>
+              </div>
+            </section>
+            <div class="messages" id="messages"></div>
+          </div>
+
+          <div class="composer-wrap">
+            <form class="composer" id="composer">
+              <label class="sr-only" for="message-input">Ваше сообщение</label>
+              <textarea id="message-input" rows="1" maxlength="8000" placeholder="Напишите сообщение…" autocomplete="off" disabled></textarea>
+              <div class="composer-footer">
+                <span class="composer-hint"><kbd>Enter</kbd> отправить <span class="hint-divider">·</span> <kbd>Shift + Enter</kbd> новая строка</span>
+                <button class="send-button" id="send-button" type="submit" aria-label="Отправить сообщение" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15V5m-4 4 4-4 4 4"/></svg></button>
+              </div>
+            </form>
+            <p class="disclaimer">ИИ может ошибаться. Не вводите пароли, платёжные данные или другую конфиденциальную информацию.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="auth-screen" id="auth-screen" aria-modal="true" role="dialog" aria-labelledby="auth-title">
+      <form class="auth-card" id="auth-form">
+        <div class="auth-mark" aria-hidden="true"><span>✳</span></div>
+        <p class="eyebrow">ЛИЧНЫЙ ДОСТУП</p>
+        <h2 id="auth-title">Добро пожаловать</h2>
+        <p class="auth-description" id="auth-description">Введите ключ доступа, чтобы открыть чат.</p>
+        <label class="auth-label" for="access-key">Ключ доступа</label>
+        <div class="password-wrap"><input id="access-key" name="key" type="password" autocomplete="current-password" placeholder="Ваш личный ключ" required><button class="reveal-button" id="reveal-key" type="button" aria-label="Показать ключ">Показать</button></div>
+        <button class="auth-submit" id="auth-submit" type="submit">Открыть чат <span>→</span></button>
+        <p class="auth-error" id="auth-error" role="status"></p>
+        <p class="auth-footnote">Ключ проверяется сервером и хранится в этой вкладке до её закрытия.</p>
+      </form>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
