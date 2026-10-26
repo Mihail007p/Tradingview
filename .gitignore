@@ -1,8 +1,0 @@
-node_modules/
-.wrangler/
-.dev.vars
-dist/
-*.log
-
-# локальный журнал превью-режима
-tools/journal.json
